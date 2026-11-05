@@ -13,7 +13,7 @@ import (
 )
 
 // releasesPage is where users download a release by hand when the in-app update fails.
-const releasesPage = "https://github.com/zuiho-kai/bothouse/releases/latest"
+const releasesPage = "https://github.com/HarunaRyo-051/bothouse/releases/latest"
 
 // Swappable in tests; production uses the existing updater (same path as `/upgrade confirm`).
 var (

@@ -1,7 +1,6 @@
 name: Release bothouse
 
-# Native bothouse downloads. DMGs are built on macOS.
-# The Mac Studio runner (label bothouse-mac) builds the dmg (lipo, hdiutil, package-dmg.sh need macOS).
+# Native bothouse downloads. DMGs are built on GitHub-hosted macOS (lipo, hdiutil and package-dmg.sh need macOS).
 # Everything else runs on GitHub-hosted ubuntu-latest (free for this public repo, so releases do not queue
 # behind PR checks): it cross-compiles Linux x64/arm64 and the Windows exe (CGO_ENABLED=0, so no C toolchain) and publishes.
 # Windows 真机验装暂时没有：家里 Windows 机离线（windows-local、sanxin-hk 都连不上）；用户 2026-10-23「那就没必要先搞验证，
@@ -77,7 +76,7 @@ jobs:
           - name: linux
             labels: ubuntu-latest
           - name: macos
-            labels: [self-hosted, bothouse-mac]
+            labels: macos-latest
     runs-on: ${{ matrix.labels }}
     defaults:
       run:
@@ -85,13 +84,12 @@ jobs:
     timeout-minutes: 30
     env:
       TAG: ${{ github.event.inputs.tag || github.ref_name }}
-      # Fixed release signing identity (#299): macOS keeps privacy (TCC) permissions across updates
-      # only while the identifier and certificate stay the same. The hash is the public SHA-1 of the
-      # self-signed "Bothouse Release Signing" certificate; its key lives only in a keychain on the
-      # self-hosted Mac (~/.config/bothouse-signing/). Both are compiled in, so the in-app update
-      # can tell a release binary from a self-built one (bridge/core/update_sign.go).
+      # Keep the same signing certificate and identifier across releases for macOS TCC permissions.
+      # The certificate SHA-1 is compiled into the binary for the in-app update guard.
       SIGN_ID: ai.bothouse.desktop
-      SIGN_HASH: 90C081464BA60F81CE7FF6E18767F40D5E650CD1
+      SIGN_HASH: ${{ secrets.BOTHOUSE_SIGN_HASH }}
+      SIGN_P12_BASE64: ${{ secrets.BOTHOUSE_SIGN_P12 }}
+      SIGN_P12_PASSWORD: ${{ secrets.BOTHOUSE_SIGN_PASSWORD }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -165,15 +163,31 @@ jobs:
               -output build/bothouse-universal
             # Sign the single binary (not the .app): the in-app update swaps only this file, so its
             # signature must stand on its own. Nothing may modify the file after this.
-            signdir="$HOME/.config/bothouse-signing"
-            keychain="$signdir/bothouse-signing.keychain-db"
-            # password from stdin, never in argv; the keychain's key partition list already allows codesign
-            # (security set-key-partition-list -S apple-tool:,apple:,codesign:), so signing does not prompt
-            security unlock-keychain "$keychain" < "$signdir/keychain.pass" >/dev/null
-            trap 'security lock-keychain "$keychain"' EXIT
+            set +x
+            : "${SIGN_P12_BASE64:?missing SIGN_P12_BASE64 secret}"
+            : "${SIGN_P12_PASSWORD:?missing SIGN_P12_PASSWORD secret}"
+            : "${SIGN_HASH:?missing SIGN_HASH secret}"
+            signdir=$(mktemp -d)
+            p12=$(mktemp "$signdir/signing.XXXXXX")
+            keychain="$signdir/signing.keychain-db"
+            cleanup_signing() {
+              security delete-keychain "$keychain" >/dev/null 2>&1 || true
+              rm -f "$p12"
+              rmdir "$signdir"
+            }
+            trap cleanup_signing EXIT
+            chmod 600 "$p12"
+            printf '%s' "$SIGN_P12_BASE64" | base64 -D > "$p12"
+            keychain_password=$(openssl rand -hex 32)
+            security create-keychain -p "$keychain_password" "$keychain"
+            security set-keychain-settings -lut 21600 "$keychain"
+            security unlock-keychain -p "$keychain_password" "$keychain"
+            security import "$p12" -k "$keychain" -P "$SIGN_P12_PASSWORD" -T /usr/bin/codesign
+            security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain"
             codesign --force --keychain "$keychain" --sign "$SIGN_HASH" --identifier "$SIGN_ID" build/bothouse-universal
-            security lock-keychain "$keychain"
             codesign --verify "-R=identifier \"$SIGN_ID\" and certificate leaf = H\"$SIGN_HASH\"" build/bothouse-universal
+            cleanup_signing
+            trap - EXIT
             ../.github/release-check/package-dmg.sh build/bothouse-universal ../dist/bothouse-mac.dmg "$TAG"
           fi
           cd ../dist

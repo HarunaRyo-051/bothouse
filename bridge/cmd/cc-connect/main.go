@@ -1749,7 +1749,7 @@ func printUsage() {
   Supports: Claude Code, Codex, Cursor, Gemini CLI, Qoder CLI, OpenCode
   Platforms: Feishu, TuiTui, Telegram, Slack, DingTalk, Discord, LINE, WeChat Work, Weixin, QQ, QQ Bot
 
-  bothouse: https://github.com/zuiho-kai/bothouse (docs/GETTING_STARTED.md)
+  bothouse: https://github.com/HarunaRyo-051/bothouse (docs/GETTING_STARTED.md)
 
 Usage:
   bothouse [flags]
