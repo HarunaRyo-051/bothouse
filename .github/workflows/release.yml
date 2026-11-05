@@ -88,7 +88,8 @@ jobs:
       # The certificate SHA-1 is compiled into the binary for the in-app update guard.
       SIGN_ID: ai.bothouse.desktop
       SIGN_HASH: ${{ secrets.BOTHOUSE_SIGN_HASH }}
-      SIGN_P12_BASE64: ${{ secrets.BOTHOUSE_SIGN_P12 }}
+      SIGN_CERT_PEM: ${{ secrets.BOTHOUSE_SIGN_CERT_PEM }}
+      SIGN_KEY_PEM: ${{ secrets.BOTHOUSE_SIGN_KEY_PEM }}
       SIGN_P12_PASSWORD: ${{ secrets.BOTHOUSE_SIGN_PASSWORD }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -164,20 +165,24 @@ jobs:
             # Sign the single binary (not the .app): the in-app update swaps only this file, so its
             # signature must stand on its own. Nothing may modify the file after this.
             set +x
-            : "${SIGN_P12_BASE64:?missing SIGN_P12_BASE64 secret}"
+            : "${SIGN_CERT_PEM:?missing SIGN_CERT_PEM secret}"
+            : "${SIGN_KEY_PEM:?missing SIGN_KEY_PEM secret}"
             : "${SIGN_P12_PASSWORD:?missing SIGN_P12_PASSWORD secret}"
             : "${SIGN_HASH:?missing SIGN_HASH secret}"
             signdir=$(mktemp -d)
-            p12=$(mktemp "$signdir/signing.XXXXXX")
+            p12="$signdir/signing.p12"
             keychain="$signdir/signing.keychain-db"
             cleanup_signing() {
               security delete-keychain "$keychain" >/dev/null 2>&1 || true
-              rm -f "$p12"
-              rmdir "$signdir"
+              rm -rf "$signdir"
             }
             trap cleanup_signing EXIT
-            chmod 600 "$p12"
-            printf '%s' "$SIGN_P12_BASE64" | base64 -D > "$p12"
+            # The p12 is assembled here from PEM text: a binary secret survives fewer transports.
+            printf '%s\n' "$SIGN_CERT_PEM" > "$signdir/cert.pem"
+            printf '%s\n' "$SIGN_KEY_PEM" > "$signdir/key.pem"
+            chmod 600 "$signdir/key.pem"
+            openssl pkcs12 -export -legacy -inkey "$signdir/key.pem" -in "$signdir/cert.pem" \
+              -out "$p12" -passout "pass:$SIGN_P12_PASSWORD" -name "Bothouse Fork Signing"
             keychain_password=$(openssl rand -hex 32)
             security create-keychain -p "$keychain_password" "$keychain"
             security set-keychain-settings -lut 21600 "$keychain"
