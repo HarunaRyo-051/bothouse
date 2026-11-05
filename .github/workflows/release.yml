@@ -194,7 +194,7 @@ jobs:
             security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain"
             # A self-signed certificate only becomes a usable signing identity once it is trusted,
             # and codesign looks identities up through the user's search list, not --keychain alone.
-            security add-trusted-cert -r trustRoot -k "$keychain" "$signdir/cert.pem"
+            sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain "$signdir/cert.pem"
             previous_keychains=$(security list-keychains -d user | tr -d '"')
             security list-keychains -d user -s "$keychain" $previous_keychains
             codesign --force --keychain "$keychain" --sign "$SIGN_HASH" --identifier "$SIGN_ID" build/bothouse-universal
