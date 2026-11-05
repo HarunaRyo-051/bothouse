@@ -1195,6 +1195,39 @@ test('store: a v1 database migrates to the current schema and keeps its rows', a
   reopened.close();
 });
 
+test('store: the pre-rollback v12 database opens, while other newer schemas still fail', async () => {
+  const { DatabaseSync } = await import('node:sqlite');
+  const { mkdtempSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { tmpdir } = await import('node:os');
+  const dir = mkdtempSync(join(tmpdir(), 'collab-v12-'));
+  // A v12 database is the develop schema: additive columns plus task files.
+  const path = join(dir, 'v12.sqlite3');
+  const seeded = new Store(path);
+  seeded.ensureRoom(1, 'general');
+  seeded.append(1, { authorKind: 'user', author: 'owner', name: '我', text: 'kept' });
+  seeded.db.exec("ALTER TABLE tasks ADD COLUMN file_chat_id integer; ALTER TABLE rooms ADD COLUMN dm_member text; ALTER TABLE messages ADD COLUMN memories text; CREATE TABLE task_files (id integer primary key, task_id integer, attachment_id text, role text, label text, added_by text, created_at integer); PRAGMA user_version = 12");
+  seeded.close();
+  const reopened = new Store(path);
+  assert.equal(reopened.page(1, undefined, 1)[0].text, 'kept', 'history survives a v12 database');
+  assert.equal(reopened.db.prepare('PRAGMA user_version').get().user_version, 12, 'the version is not downgraded');
+  reopened.close();
+
+  // A v12 database missing the columns that patch tolerates is still refused.
+  const broken = join(dir, 'broken.sqlite3');
+  const raw = new DatabaseSync(broken);
+  raw.exec("CREATE TABLE tasks (id integer); CREATE TABLE messages (id integer); CREATE TABLE rooms (id integer); CREATE TABLE task_files (id integer); PRAGMA user_version = 12");
+  raw.close();
+  assert.throws(() => new Store(broken), /newer than/);
+
+  // So is any version beyond the tolerated one.
+  const future = join(dir, 'v13.sqlite3');
+  const later = new DatabaseSync(future);
+  later.exec('PRAGMA user_version = 13');
+  later.close();
+  assert.throws(() => new Store(future), /newer than/);
+});
+
 test('finalText picks the last non-empty assistant text', () => {
   assert.equal(finalText([
     { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: 'a' }] } } },

@@ -85,7 +85,18 @@ export class Store {
     this.sessionResets = [];
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
     let version = this.db.prepare('PRAGMA user_version').get().user_version;
-    if (version > SCHEMA_VERSION) throw Error(`collab: store schema ${version} is newer than ${SCHEMA_VERSION}`);
+    if (version > SCHEMA_VERSION) {
+      // The pre-rollback desktop database has additive v12 columns and task files.
+      // Keep its version and data; reject other newer schemas instead of downgrading them.
+      const tables = new Set(this.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map(row => row.name));
+      const columns = table => new Set(this.db.prepare(`PRAGMA table_info(${table})`).all().map(row => row.name));
+      const files = tables.has('task_files') ? columns('task_files') : new Set();
+      const compatible = version === 12 &&
+        ['task_id', 'attachment_id', 'role', 'label', 'added_by'].every(column => files.has(column)) &&
+        columns('tasks').has('file_chat_id') && columns('rooms').has('dm_member') &&
+        columns('messages').has('memories');
+      if (!compatible) throw Error(`collab: store schema ${version} is newer than ${SCHEMA_VERSION}`);
+    }
     this.ensureSchema(version);
     this.q = {
       room: this.db.prepare('SELECT id, name, kind, parent_id FROM rooms WHERE id = ?'),
