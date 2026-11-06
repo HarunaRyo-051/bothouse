@@ -232,13 +232,14 @@ function MessageRow({ message, member, t, onConfigure, menuOpen, onAvatar, onClo
   )
 }
 
-function MemberGroup({ title, members, busy, onPick, onEdit, onRemove, t }: {
+function MemberGroup({ title, members, busy, onPick, onEdit, onRemove, onToggleDispatch, t }: {
   title: string
   members: readonly ChannelMember[]
   busy: ReadonlySet<string>
   onPick: (member: ChannelMember) => void
   onEdit: (member: ChannelMember) => void
   onRemove: (member: ChannelMember) => void
+  onToggleDispatch: (member: ChannelMember) => void
   t: T
 }) {
   if (members.length === 0) return null
@@ -265,6 +266,10 @@ function MemberGroup({ title, members, busy, onPick, onEdit, onRemove, t }: {
               )}
             </span>
           </button>
+          {m.kind !== 'human' && <label className={css.memberActions} title={t('memberNoDispatch')}>
+            <input type="checkbox" aria-label={`${m.name} ${t('memberNoDispatch')}`} checked={m.noDispatch === true} onChange={() => onToggleDispatch(m)} />
+            {t('memberNoDispatch')}
+          </label>}
           {m.kind === 'dsh' && (m.editable === true
             ? (
                 <span className={css.memberActions}>
@@ -284,7 +289,7 @@ function MemberGroup({ title, members, busy, onPick, onEdit, onRemove, t }: {
  * @param props - framework, injected, and locale shares.
  * @returns the three-column channel view.
  */
-export function ChannelsPage({ useChannels, selectRoom, send, reviewTask, createRoom, renameRoom, listModels, listClis, listPersonas, addMember, updateMember, removeMember, setLead, setWorkspacePath, renewRoom, setDispatchMode, setMaxRelay, decidePermission, retryMessage, editMessage, withdrawMessage, openModelSettings, t }: ChannelsPageProps) {
+export function ChannelsPage({ useChannels, selectRoom, send, reviewTask, createRoom, renameRoom, listModels, listClis, listPersonas, addMember, updateMember, removeMember, setNoDispatch, setLead, setWorkspacePath, renewRoom, setDispatchMode, setMaxRelay, decidePermission, retryMessage, editMessage, withdrawMessage, openModelSettings, t }: ChannelsPageProps) {
   const state = useChannels(snapshot => snapshot)
   // #148: the own message being edited, and the last edit/withdraw outcome to show.
   const [editing, setEditing] = useState<{ id: number; text: string } | undefined>(undefined)
@@ -438,7 +443,7 @@ export function ChannelsPage({ useChannels, selectRoom, send, reviewTask, create
   const byId = new Map(visibleMembers.map(m => [m.id, m]))
   const typingNames = (state.roomId === undefined ? [] : state.thinking[String(state.roomId)] ?? []).map(id => byId.get(id)?.name ?? id)
   const mention = activeMention(draft, caret)
-  const candidates = mention === undefined || mention.start === dismissedAt ? [] : rankMembers(visibleMembers, mention.query)
+  const candidates = mention === undefined || mention.start === dismissedAt ? [] : rankMembers(visibleMembers.filter(m => !m.noDispatch), mention.query)
   const popupOpen = mention !== undefined && candidates.length > 0
   openMentionAt.current = popupOpen ? mention.start : undefined
   const selected = Math.min(highlight, Math.max(candidates.length - 1, 0))
@@ -822,8 +827,8 @@ export function ChannelsPage({ useChannels, selectRoom, send, reviewTask, create
         <button type="button" className={css.addMemberButton} onClick={() => { setDrawer(undefined); setDialog(null) }}>+ {t('addMember')}</button>
         {memberError !== undefined && <div className={css.sendError} role="alert">{memberError}</div>}
         <hr className={css.memberListDivider} />
-        <MemberGroup title={t('agents', { count: String(visibleMembers.filter(m => m.kind !== 'human').length) })} members={visibleMembers.filter(m => m.kind !== 'human')} busy={busy} onPick={pickFromList} onEdit={setDialog} onRemove={confirmRemove} t={t} />
-        <MemberGroup title={t('humans', { count: String(visibleMembers.filter(m => m.kind === 'human').length) })} members={visibleMembers.filter(m => m.kind === 'human')} busy={busy} onPick={pickFromList} onEdit={setDialog} onRemove={confirmRemove} t={t} />
+        <MemberGroup title={t('agents', { count: String(visibleMembers.filter(m => m.kind !== 'human').length) })} members={visibleMembers.filter(m => m.kind !== 'human')} busy={busy} onPick={pickFromList} onEdit={setDialog} onRemove={confirmRemove} onToggleDispatch={m => { if (channelId !== undefined) setNoDispatch(channelId, m.id, !m.noDispatch).catch((error: unknown) => setMemberError(error instanceof Error ? error.message : String(error))) }} t={t} />
+        <MemberGroup title={t('humans', { count: String(visibleMembers.filter(m => m.kind === 'human').length) })} members={visibleMembers.filter(m => m.kind === 'human')} busy={busy} onPick={pickFromList} onEdit={setDialog} onRemove={confirmRemove} onToggleDispatch={m => { if (channelId !== undefined) setNoDispatch(channelId, m.id, !m.noDispatch).catch((error: unknown) => setMemberError(error instanceof Error ? error.message : String(error))) }} t={t} />
       </aside>
       {settingsOpen && room !== undefined && <ChannelSettingsDialog
         key={room.id}

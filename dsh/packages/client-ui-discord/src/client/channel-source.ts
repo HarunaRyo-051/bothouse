@@ -81,6 +81,7 @@ export interface ChannelMember {
   readonly name: string
   readonly kind: 'human' | 'dsh' | 'bot'
   readonly online: boolean
+  readonly noDispatch?: boolean
   readonly error?: string
   /** DSH members only: configured model, or null for the host default. */
   readonly model?: MemberModel | null
@@ -291,6 +292,7 @@ export interface ChannelActions {
   updateMember(id: string, input: MemberInput): Promise<void>
   /** Remove a UI-created DSH member. */
   removeMember(id: string): Promise<void>
+  setNoDispatch(roomId: number, id: string, blocked: boolean): Promise<void>
   /** Select the member that owns the primary-role slot for this collab service. */
   setDispatchMode(roomId: number, mode: DispatchMode): Promise<void>
   /** Set the channel's relay cap (6–20, #445); workspaces write through to their chat channel. */
@@ -824,6 +826,10 @@ export function createChannelSource(transport: ChannelTransport): {
     },
     async removeMember(id) {
       await request(`collab/api/members/${encodeURIComponent(id)}`, { method: 'DELETE' })
+    },
+    async setNoDispatch(roomId, id, blocked) {
+      await request(`collab/api/rooms/${roomId}/members/${encodeURIComponent(id)}/no-dispatch`, json('PATCH', { no_dispatch: blocked }))
+      set({ members: snapshot.members.map(m => m.id === id ? { ...m, noDispatch: blocked } : m) })
     },
     async setDispatchMode(roomId, mode) {
       const result = await request<{ dispatch_mode: DispatchMode; dispatch_explicit: boolean }>(`collab/api/rooms/${roomId}/mode`, json('PATCH', { dispatch_mode: mode }))

@@ -370,6 +370,17 @@ export async function apply(ctx, rawConfig) {
         return { room };
       });
     }
+    const dispatchSetting = /^\/collab\/api\/rooms\/(\d+)\/members\/([^/]+)\/no-dispatch$/.exec(path);
+    if (dispatchSetting && req.method === 'PATCH') return withBody(req, res, body => {
+      const roomId = Number(dispatchSetting[1]);
+      const id = decodeURIComponent(dispatchSetting[2]);
+      if (store.room(roomId) === undefined) throw new CollabError('room-missing', `room ${roomId} does not exist`);
+      if (!hub.membersInRoom(roomId).some(m => m.id === id)) throw new CollabError('member-missing', `member ${id} does not belong to room ${roomId}`);
+      if (typeof body?.no_dispatch !== 'boolean') throw new CollabError('invalid', 'no_dispatch must be boolean');
+      store.setNoDispatch(roomId, id, body.no_dispatch);
+      hub.emit({ type: 'members', members: hub.memberView() });
+      return { member_id: id, no_dispatch: store.noDispatch(roomId, id) };
+    });
     if (path === '/collab/api/members' && req.method === 'POST') {
       return withBody(req, res, async body => ({ member: await roster.create(body) }));
     }
@@ -574,7 +585,8 @@ function ticketWorkspace(req, res, roomId, { store, hub, gateway, later, tasks, 
   if (hub.primaryIn(roomId)?.id !== claims.member) return Promise.resolve(json(res, 403, { error: 'only the primary role opens workspaces' }));
   return withBody(req, res, body => {
     const lead = claims.member;
-    const taskOwner = body?.owner === undefined || body.owner === '' ? lead : String(body.owner);
+    const taskOwner = String(body?.owner ?? '').trim();
+    if (!taskOwner) throw new CollabError('invalid', '派活必须写明接活人 owner');
     if (!hub.routable().some(r => r.id === taskOwner)) throw new CollabError('member-missing', 'unknown owner');
     const title = String(body?.title ?? '').trim();
     if (!title) throw new CollabError('invalid', 'workspace handoff requires a title');

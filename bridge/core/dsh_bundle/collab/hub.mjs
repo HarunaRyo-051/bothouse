@@ -92,7 +92,7 @@ export class Hub {
 
   memberView() {
     return this.memberList().map(({ id, name, kind, online, model, cli, permissionPreset, persona, nameCustomized, avatar, avatarVersion, source, error, rooms }) => ({
-      id, name, kind, ...(rooms ? { rooms } : {}), online: online !== false && !error, ...(error ? { error } : {}), ...(avatar ? { avatar, ...(avatarVersion ? { avatarVersion } : {}) } : {}),
+      id, name, kind, ...(this.store.closed ? {} : { noDispatch: this.store.noDispatchAnywhere(id) }), ...(rooms ? { rooms } : {}), online: online !== false && !error, ...(error ? { error } : {}), ...(avatar ? { avatar, ...(avatarVersion ? { avatarVersion } : {}) } : {}),
       ...(kind === 'dsh' ? { model: model ?? null, ...(cli ? { cli, ...(permissionPreset ? { permissionPreset } : {}) } : {}), ...(nameCustomized === undefined ? {} : { nameCustomized }), persona: persona ?? '', editable: source === 'ui' } : {}),
     }));
   }

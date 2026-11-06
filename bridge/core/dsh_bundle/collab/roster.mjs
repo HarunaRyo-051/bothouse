@@ -27,6 +27,7 @@ export function rowToMember(row) {
     ...(row.avatar ? { avatar: row.avatar } : {}),
     ...(row.rooms && row.rooms !== '[]' ? { rooms: JSON.parse(row.rooms) } : {}),
     source: row.source,
+    ...(row.no_dispatch ? { noDispatch: true } : {}),
   };
 }
 

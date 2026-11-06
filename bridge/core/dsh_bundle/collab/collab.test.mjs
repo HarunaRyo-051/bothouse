@@ -3682,11 +3682,12 @@ test('tasks: the lead @-ing teammates opens board tasks; their reply to the lead
   hub.fallbackLead = 'lead';
   hub.setMember({ id: 'gpt', name: '龙娘', kind: 'bot', online: true });
   const say = (author, name, text) => hub.post(1, { authorKind: 'role', author, name, text }).message;
-  const dispatch = say('lead', '橘', '@龙娘 @DeepSeek 把登录页写完\n细节见上');
+  const dispatch = say('lead', '橘', '@龙娘 把登录页写完\n细节见上');
+  const secondDispatch = say('lead', '橘', '@DeepSeek 实现登录页交互');
   await tick();
   let list = tasks.list(1);
   assert.deepEqual(list.map(t => [t.owner, t.status, t.title, t.assign_msg_id]).sort(),
-    [['ds', 'assigned', '把登录页写完', dispatch.id], ['gpt', 'assigned', '把登录页写完', dispatch.id]]);
+    [['ds', 'assigned', '实现登录页交互', secondDispatch.id], ['gpt', 'assigned', '把登录页写完', dispatch.id]]);
   // A second @ to an owner with an open task from the lead is a follow-up, not a new task.
   say('lead', '橘', '@龙娘 记得加测试');
   await tick();
@@ -3723,7 +3724,8 @@ test('tasks: a DSH member\'s one-message 【接】 reply is its delivery and han
   hub.fallbackLead = 'lead';
   hub.setMember({ id: 'gpt', name: '龙娘', kind: 'bot', online: true });
   const say = (author, name, text) => hub.post(1, { authorKind: 'role', author, name, text }).message;
-  say('lead', '橘', '@龙娘 @DeepSeek 把登录页写完');
+  say('lead', '橘', '@龙娘 把登录页写完');
+  say('lead', '橘', '@DeepSeek 实现登录页交互');
   await tick();
   // A DSH member (local CLI members included) posts once, when its turn has ended:
   // dsh-member.mjs returnToLead puts the lead's @ in front of the stance.
@@ -3755,8 +3757,8 @@ test('tasks: bridge task card members open and hand back board tasks (cloud-web 
   ws.frame({ type: 'register', project: 'lead' });
   // Statuses as core.TaskMember writes them (task_members.go: report result -> completed);
   // the sub-row shares the teammate's reporter_project, as the bridge sends it.
-  const card = (status, child = status) => PROGRESS_PREFIX + JSON.stringify({ state: 'running', items: [{ kind: 'info', text: '📋 t' }],
-    task_members: [{ reporter_project: 'gpt', id: 'm1', name: '龙娘', title: '修 bug', status },
+  const card = (status, child = status, title = '修 bug') => PROGRESS_PREFIX + JSON.stringify({ state: 'running', items: [{ kind: 'info', text: '📋 t' }],
+    task_members: [{ reporter_project: 'gpt', id: 'm1', name: '龙娘', title, status },
       { reporter_project: 'gpt', id: 'c1', parent_id: 'm1', name: 'subagent', title: 'x', status: child }] });
   ws.frame({ type: 'preview_start', ref_id: 'taskcard-1', reply_ctx: 'room-1', content: card('queued'), seq: 1 });
   await tick();
@@ -3784,10 +3786,10 @@ test('tasks: bridge task card members open and hand back board tasks (cloud-web 
   // public-progress `result` and the older `done` spelling.
   for (const [i, end] of ['result', 'completed', 'done', 'failed', 'cancelled', 'interrupted'].entries()) {
     const ref = `taskcard-${i + 2}`;
-    ws.frame({ type: 'preview_start', ref_id: ref, reply_ctx: 'room-1', content: card('running'), seq: 1 });
+    ws.frame({ type: 'preview_start', ref_id: ref, reply_ctx: 'room-1', content: card('running', 'running', `修 bug ${i}`), seq: 1 });
     await tick();
     const h = ws.of('preview_ack').at(-1).preview_handle;
-    ws.frame({ type: 'update_message', preview_handle: h, content: card(end), seq: 2 });
+    ws.frame({ type: 'update_message', preview_handle: h, content: card(end, end, `修 bug ${i}`), seq: 2 });
     await tick();
     const t = tasks.list(1).find(x => x.assign_msg_id === Number(h));
     assert.equal(t?.status, 'returned', `${end} hands back`);
@@ -4994,7 +4996,7 @@ async function g24Setup(members = ['ju']) {
 
 test('G24: single primary opens a workspace by ticket; task owned by itself, watch armed, woken', async () => {
   const { hub, tasks, later, nudged, call, now } = await g24Setup(['ju']);
-  const res = await call(later.ticket('ju', 1), { title: '修登录页' });
+  const res = await call(later.ticket('ju', 1), { title: '修登录页', owner: 'ju' });
   assert.equal(res.status, 200);
   assert.equal(res.body.workspace.name, '工作区1');
   const [task] = tasks.list(1);
@@ -5009,8 +5011,8 @@ test('channel primary tickets: each channel accepts only its own selected role',
   const { hub, later, call } = await g24Setup(['ju', 'long']);
   hub.store.ensureRoom(2, 'other');
   hub.store.setLead(1, 'ju'); hub.store.setLead(2, 'long');
-  assert.equal((await call(later.ticket('ju', 1), { title: 'one' }, 1)).status, 200);
-  assert.equal((await call(later.ticket('long', 2), { title: 'two' }, 2)).status, 200);
+  assert.equal((await call(later.ticket('ju', 1), { title: 'one', owner: 'ju' }, 1)).status, 200);
+  assert.equal((await call(later.ticket('long', 2), { title: 'two', owner: 'long' }, 2)).status, 200);
   assert.equal((await call(later.ticket('ju', 2), { title: 'wrong' }, 2)).status, 403);
   assert.equal((await call(later.ticket('long', 1), { title: 'wrong' }, 1)).status, 403);
 });
@@ -5035,18 +5037,18 @@ test('G24: an @-dispatched chat task is handed over, not opened twice', async ()
 test('G24: a ticket of the former primary is refused after the primary changes', async () => {
   const { tasks, later, call, setLead } = await g24Setup(['ju', 'long']);
   const old = later.ticket('ju', 1);
-  assert.equal((await call(old, { title: 'a' })).status, 200);
+  assert.equal((await call(old, { title: 'a', owner: 'ju' })).status, 200);
   setLead('long');
   const res = await call(old, { title: 'b' });
   assert.equal(res.status, 403);
-  assert.equal((await call(later.ticket('long', 1), { title: 'c' })).status, 200);
+  assert.equal((await call(later.ticket('long', 1), { title: 'c', owner: 'long' })).status, 200);
   assert.equal((await call(later.ticket('long', 1), { title: 'd' }, 2)).status, 403, 'ticket for another room');
   assert.equal(tasks.list(1).length, 2, 'only the two accepted calls opened tasks');
 });
 
 test('G24: no or bad ticket is refused; owner must be a routable member', async () => {
   const { later, call } = await g24Setup(['ju']);
-  assert.equal((await call(later.ticket('ju', 1), { title: 'ok' })).status, 200);
+  assert.equal((await call(later.ticket('ju', 1), { title: 'ok', owner: 'ju' })).status, 200);
   assert.equal((await call(undefined, { title: 'x' })).status, 401);
   assert.equal((await call('bad.ticket', { title: 'x' })).status, 401);
   assert.equal((await call(later.ticket('ju', 1), { title: 'x', owner: 'owner' })).status, 404);
@@ -5083,7 +5085,7 @@ test('G24: the local workspace command carries a reason into the owner\'s turn i
     assert.match(later.workspaceInstructions('cc', 1), /交接说明[\s\S]*用户原话[\s\S]*参照[\s\S]*分支[\s\S]*验收标准/);
     const reason = '用户原话：登录页点了没反应。参照 auth/legacy.mjs，以 main 为底，验收：点登录跳到首页';
     const out = await new Promise(resolve => {
-      const child = spawn(process.execPath, [scriptPath(new URL('./later.mjs', import.meta.url)), 'workspace', later.origin, later.ticket('cc', 1), '修登录页', '', reason]);
+      const child = spawn(process.execPath, [scriptPath(new URL('./later.mjs', import.meta.url)), 'workspace', later.origin, later.ticket('cc', 1), '修登录页', 'cc', reason]);
       let text = ''; child.stdout.on('data', d => { text += d; }); child.stderr.on('data', d => { text += d; });
       child.on('close', status => resolve({ status, text }));
     });
@@ -5144,7 +5146,7 @@ function g34Setup() {
   tasks.onWake((id, m) => { woken.push([id, m.room_id, m.text]); return true; });
   const ws = hub.store.createWorkspace(1);
   const assign = (owner = 'fu') => {
-    const t = tasks.assign({ roomId: ws.id, title: '记账', owner, actor: 'zhu' });
+    const t = tasks.assign({ roomId: ws.id, title: `记账-${owner}`, owner, actor: 'zhu' });
     tasks.q.setSource.run('workspace', t.id);
     return t;
   };

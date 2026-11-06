@@ -24,6 +24,7 @@ const SCHEMA_VERSION = 11;
 /** Columns added after v1, as [table, column, definition]; ensureSchema() adds any missing one. */
 const COLUMNS = [
   ['members', 'name_customized', 'INTEGER'],
+  ['members', 'no_dispatch', 'INTEGER NOT NULL DEFAULT 0'],
   ['bindings', 'workspace_path', 'TEXT'], // Keep a CLI conversation in its original directory until /new. // NULL keeps existing names unchanged; only new UI members opt in.
 
   ['jobs', 'input_id', 'TEXT'], // v2: jobs remember the id of the input they admitted, to bind its consuming turn.
@@ -153,6 +154,9 @@ export class Store {
       updateMember: this.db.prepare(`UPDATE members SET name = ?, provider = ?, model = ?, cli = ?, persona = ?, avatar = ?, permission_preset = ?, name_customized = ?, rooms = ?
         WHERE id = ? AND source = 'ui' AND removed = 0 RETURNING *`),
       removeMember: this.db.prepare("UPDATE members SET removed = 1 WHERE id = ? AND source = 'ui' AND removed = 0 RETURNING *"),
+      setNoDispatch: this.db.prepare('UPDATE members SET no_dispatch = ? WHERE id = ? AND removed = 0 RETURNING *'),
+      setBotNoDispatch: this.db.prepare('INSERT INTO dispatch_blocks (room_id, member_id, blocked) VALUES (?, ?, ?) ON CONFLICT(room_id, member_id) DO UPDATE SET blocked = excluded.blocked'),
+      botNoDispatch: this.db.prepare('SELECT blocked FROM dispatch_blocks WHERE room_id = ? AND member_id = ?'),
     };
   }
 
@@ -187,6 +191,9 @@ export class Store {
       this.dedupeWorkspaceNames();
       // v9: the tasks table (#139 team mode B), ensured idempotently like the columns above.
       this.ensureTasks();
+      this.db.exec(`CREATE TABLE IF NOT EXISTS dispatch_blocks (
+        room_id INTEGER NOT NULL REFERENCES rooms(id), member_id TEXT NOT NULL,
+        blocked INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (room_id, member_id))`);
       // Team mode C upgrade: before it a workspace's parent_id only named the last chat channel
       // that handed off, never cleared. A workspace with no task in work then is done: put it in
       // the pool, else it would belong to that channel forever (no task left to release it).
@@ -594,6 +601,16 @@ export class Store {
   /** Active DSH members, config seeds and UI-created alike. */
   members() { return this.q.members.all(); }
   member(id) { return this.q.member.get(id); }
+  noDispatch(roomId, id) {
+    return Boolean(this.member(id)?.no_dispatch || (this.room(roomId) && this.q.botNoDispatch.get(this.settingsRoom(roomId), id)?.blocked));
+  }
+  noDispatchAnywhere(id) {
+    return Boolean(this.member(id)?.no_dispatch || this.db.prepare('SELECT 1 FROM dispatch_blocks WHERE member_id = ? AND blocked = 1 LIMIT 1').get(id));
+  }
+  setNoDispatch(roomId, id, blocked) {
+    if (this.member(id)) return this.q.setNoDispatch.get(Number(blocked), id);
+    this.q.setBotNoDispatch.run(this.settingsRoom(roomId), id, Number(blocked));
+  }
   /** Upsert a config member; config always wins for its own ids. */
   seedMember(m, now = Date.now() / 1000) {
     this.q.seedMember.run(m.id, m.name, m.model?.provider ?? null, m.model?.model ?? null, m.cli ?? null, m.persona ?? '', m.avatar || null, m.permissionPreset ?? null, JSON.stringify(m.rooms ?? []), now);

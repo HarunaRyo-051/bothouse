@@ -75,6 +75,7 @@ export function hasRef(ref) { return checkDispatch({ title: '', ref }) === null;
 
 export class Tasks {
   reassignForQuota(task, owner) {
+    if (this.store.noDispatch(task.room_id, owner)) throw new CollabError('forbidden', `${this.nameOf(owner)} 是转发机器人，不接活`);
     const row = this.db.prepare(`UPDATE tasks SET owner = ?, status = 'assigned', next_check_at = ?,
       renewals = 0, remind_msg_id = NULL, updated_at = ? WHERE id = ? AND owner = ? RETURNING *`)
       .get(owner, this.now() + CHECK_AFTER_S, this.now(), task.id, task.owner);
@@ -115,6 +116,8 @@ export class Tasks {
     this.tree = cols.has('parent_id') && cols.has('kind');
     this.q = {
       get: this.db.prepare('SELECT * FROM tasks WHERE id = ?'),
+      byMessage: this.db.prepare('SELECT id FROM tasks WHERE assign_msg_id = ? ORDER BY id LIMIT 1'),
+      byTitle: this.db.prepare("SELECT id FROM tasks WHERE room_id = ? AND title = ? AND status <> 'done' ORDER BY id LIMIT 1"),
       add: this.db.prepare(`INSERT INTO tasks (room_id, parent_task, title, owner, created_by, status, next_check_at, assign_msg_id, created_at, updated_at, reason, ref, base)
         VALUES (?, ?, ?, ?, ?, 'assigned', ?, ?, ?, ?, ?, ?, ?) RETURNING *`),
       // The last ? keeps (1) or drops (0) an undelivered reminder: only 接/问 stay the owner's turn.
@@ -291,7 +294,9 @@ export class Tasks {
    * `ref`/`base` (#574): an API dispatch passes ref (string, checked by the shared rules) and, for a
    * multi-editor task, base; undefined ref (tasks opened from chat or bridge cards) skips the check.
    */
-  assign({ roomId, title, owner, actor, parentTask, reviewOf, messageId, reason, ref, base, force = false }) {
+  assign({ roomId, title, owner, actor, parentTask, reviewOf, messageId, reason, ref, base, force = false, allowDuplicate = false }) {
+    if (owner == null || typeof owner !== 'string' || !owner.trim()) throw new CollabError('invalid', '派活必须写明接活人 owner');
+    if (this.store.noDispatch(roomId, owner)) throw new CollabError('forbidden', `${this.nameOf(owner)} 是转发机器人，不接活`);
     const room = this.store.room(roomId);
     if (room === undefined) throw new CollabError('room-missing', `room ${roomId} does not exist`);
     const text = String(title ?? '').trim();
@@ -309,6 +314,12 @@ export class Tasks {
     }
     if (parentTask != null && this.task(parentTask) === undefined) throw new CollabError('task-missing', `task ${parentTask} does not exist`);
     if (messageId != null && this.store.message(messageId) === undefined) throw new CollabError('invalid', `message ${messageId} does not exist`);
+    if (!allowDuplicate && messageId != null) {
+      const existing = this.q.byMessage.get(messageId);
+      if (existing) throw new CollabError('conflict', `消息 ${messageId} 已派任务 #${existing.id}`);
+    }
+    const sameTitle = this.q.byTitle.get(roomId, text);
+    if (sameTitle) throw new CollabError('conflict', `频道内同标题任务 #${sameTitle.id} 尚未完成`);
     const refError = ref === undefined ? null : withRules(() => checkDispatch({ title: text, ref, base }));
     if (refError) throw new CollabError('invalid', refError);
     const excludeIds = parentTask != null ? this.ancestorsOf(parentTask) : new Set();
@@ -399,6 +410,7 @@ export class Tasks {
     if (verdict !== 'done' && verdict !== 'rework') throw new CollabError('invalid', 'verdict must be done or rework');
     // #574: a send-back always says why (same rule as board done: rework count > 0 needs a reason).
     if (verdict === 'rework' && !clip(note)) throw new CollabError('invalid', MISSING_REWORK_NOTE);
+    if (verdict === 'rework' && this.store.noDispatch(task.room_id, task.owner)) throw new CollabError('forbidden', `${this.nameOf(task.owner)} 是转发机器人，不接活`);
     // Rework is a new round with the same check time as a dispatch (source above).
     const check = verdict === 'rework' ? this.now() + CHECK_AFTER_S : null;
     const reclaim = verdict === 'rework' && this.reworkClaim(task);
@@ -463,7 +475,7 @@ export class Tasks {
     switch (action) {
       case 'assign':
         if (body.review_of != null && !verified) throw new CollabError('forbidden', 'delegating review needs a verified sender');
-        return this.assign({ roomId, title: body.title, owner: String(body.owner ?? ''), actor, parentTask: optional(body.parent_task), reviewOf: optional(body.review_of), messageId: optional(body.message_id), reason: body.reason, ref: String(body.ref ?? ''), base: body.base, force: Boolean(body.force) });
+        return this.assign({ roomId, title: body.title, owner: String(body.owner ?? ''), actor, parentTask: optional(body.parent_task), reviewOf: optional(body.review_of), messageId: optional(body.message_id), reason: body.reason, ref: String(body.ref ?? ''), base: body.base, force: Boolean(body.force), allowDuplicate: body.allow_duplicate === true });
       case 'stance': return this.stance(id, { actor, stance: String(body.stance ?? ''), note: body.note });
       case 'return': return this.handBack(id, { actor, messageId: optional(body.message_id) });
       case 'review': return this.review(id, { actor, verdict: String(body.verdict ?? ''), note: body.note });
@@ -621,7 +633,7 @@ export class Tasks {
       if (!title) return undefined;
       for (const owner of called) {
         if (reviewing !== undefined) {
-          this.openFromChat({ roomId: msg.room_id, owner, lead: lead.id, title, messageId: msg.id, source: 'review', reviewOf: reviewing.id });
+          this.openFromChat({ roomId: msg.room_id, owner, lead: lead.id, title, messageId: msg.id, source: 'review', reviewOf: reviewing.id, allowDuplicate: true });
           continue;
         }
         // #597 r12: structure, not wording. Once the owner's newest task here is handed back or
@@ -673,11 +685,11 @@ export class Tasks {
    * Open a chat-side task unless the owner already has one open from this lead in this room, or one
    * the lead handed to a workspace under it (the lead's later @ just tells the owner about it).
    */
-  openFromChat({ roomId, owner, lead, title, messageId, source, reviewOf }) {
+  openFromChat({ roomId, owner, lead, title, messageId, source, reviewOf, allowDuplicate = false }) {
     if (!this.hub.members.has(owner) || this.q.openChat.get(roomId, owner, lead, ...WORKING) !== undefined) return undefined;
     if (this.q.openHanded?.get(owner, lead, ...WORKING, roomId) !== undefined) return undefined;
     // force: the channel already dispatched it; the board records it even if the owner is busy elsewhere.
-    const task = this.assign({ roomId, title, owner, actor: lead, messageId, reviewOf, force: true });
+    const task = this.assign({ roomId, title, owner, actor: lead, messageId, reviewOf, force: true, allowDuplicate });
     this.q.setSource.run(source, task.id);
     return task;
   }

@@ -25,6 +25,37 @@ function setup() {
   return { hub, tasks, assign };
 }
 
+test('no-dispatch blocks force and review reassignment; unmarked members work', () => {
+  const { hub, tasks, assign } = setup();
+  hub.store.setNoDispatch(1, 'ds', true);
+  assert.throws(() => assign({ title: '禁派', ref: '无（新建）' }), e => e.code === 'forbidden' && /DeepSeek 是转发机器人，不接活/.test(e.message));
+  hub.store.setNoDispatch(1, 'ds', false);
+  const original = assign({ title: '正常派活', ref: '无（新建）' });
+  const { message } = hub.post(1, { authorKind: 'role', author: 'ds', name: 'DeepSeek', text: '完成' });
+  tasks.handBack(original.id, { actor: 'ds', messageId: message.id });
+  hub.store.setNoDispatch(1, 'ds', true);
+  assert.throws(() => tasks.review(original.id, { actor: 'lead', verdict: 'rework', note: '再改' }), /转发机器人，不接活/);
+  assert.equal(tasks.task(original.id).status, 'returned');
+  hub.setMember({ id: 'qq', name: 'QQ', kind: 'bot', online: true });
+  hub.store.setNoDispatch(1, 'qq', true);
+  assert.throws(() => tasks.assign({ roomId: 1, title: '机器人派活', owner: 'qq', actor: 'lead', force: true }), /QQ 是转发机器人，不接活/);
+  tasks.close();
+});
+
+test('assign requires owner and deduplicates source messages and open titles', () => {
+  const { hub, tasks, assign } = setup();
+  assert.throws(() => assign({ owner: '', title: '空 owner', ref: '无（新建）' }), /必须写明接活人/);
+  const { message } = hub.post(1, { authorKind: 'user', author: 'owner', name: 'Owner', text: '派活' });
+  const first = assign({ title: '第一件', message_id: message.id, ref: '无（新建）' });
+  assert.throws(() => assign({ title: '第二件', message_id: message.id, ref: '无（新建）' }), e => e.code === 'conflict' && e.message.includes(`#${first.id}`));
+  assert.throws(() => assign({ title: '第一件', ref: '无（新建）' }), e => e.code === 'conflict' && e.message.includes(`#${first.id}`));
+  const second = assign({ title: '第二件', ref: '无（新建）' });
+  assert.ok(second.id > first.id);
+  const explicit = assign({ title: '第三件', message_id: message.id, allow_duplicate: true, ref: '无（新建）' });
+  assert.ok(explicit.id > second.id);
+  tasks.close();
+});
+
 test('dispatch without ref is refused with an example', () => {
   const { tasks, assign } = setup();
   for (const ref of [undefined, '', '   ', '看着办', '14:30 前做完']) {
