@@ -633,7 +633,7 @@ export class Tasks {
       if (!title) return undefined;
       for (const owner of called) {
         if (reviewing !== undefined) {
-          this.openFromChat({ roomId: msg.room_id, owner, lead: lead.id, title, messageId: msg.id, source: 'review', reviewOf: reviewing.id, allowDuplicate: true });
+          if (this.openFromChat({ roomId: msg.room_id, owner, lead: lead.id, title, messageId: msg.id, source: 'review', reviewOf: reviewing.id })) break;
           continue;
         }
         // #597 r12: structure, not wording. Once the owner's newest task here is handed back or
@@ -647,7 +647,7 @@ export class Tasks {
           this.pendingCalls.set(key, { roomId: msg.room_id, owner, lead: lead.id, title, messageId: msg.id, at: this.now() });
           continue;
         }
-        this.openFromChat({ roomId: msg.room_id, owner, lead: lead.id, title, messageId: msg.id, source: 'mention' });
+        if (this.openFromChat({ roomId: msg.room_id, owner, lead: lead.id, title, messageId: msg.id, source: 'mention' })) break;
       }
       return undefined;
     }

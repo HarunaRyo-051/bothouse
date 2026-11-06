@@ -56,6 +56,29 @@ test('assign requires owner and deduplicates source messages and open titles', (
   tasks.close();
 });
 
+test('one chat message naming multiple owners opens only one task', () => {
+  const { hub, tasks } = setup();
+  hub.fallbackLead = 'lead';
+  hub.setMember({ id: 'second', name: '第二位', kind: 'dsh', online: true });
+  const { message } = hub.post(1, { authorKind: 'role', author: 'lead', name: '橘', text: '@DeepSeek @第二位 完成这件事' });
+  tasks.fromMessage(message);
+  assert.equal(tasks.list(1).length, 1);
+  assert.equal(tasks.list(1)[0].assign_msg_id, message.id);
+  tasks.close();
+});
+
+test('bot no-dispatch is isolated by channel', () => {
+  const { hub, tasks } = setup();
+  hub.store.ensureRoom(2, 'other');
+  hub.setMember({ id: 'qq', name: 'QQ', kind: 'bot', online: true });
+  hub.store.setNoDispatch(1, 'qq', true);
+  assert.equal(hub.store.noDispatch(1, 'qq'), true);
+  assert.equal(hub.store.noDispatch(2, 'qq'), false);
+  assert.throws(() => tasks.assign({ roomId: 1, title: '禁止', owner: 'qq', actor: 'lead' }), /不接活/);
+  assert.equal(tasks.assign({ roomId: 2, title: '允许', owner: 'qq', actor: 'lead' }).owner, 'qq');
+  tasks.close();
+});
+
 test('dispatch without ref is refused with an example', () => {
   const { tasks, assign } = setup();
   for (const ref of [undefined, '', '   ', '看着办', '14:30 前做完']) {

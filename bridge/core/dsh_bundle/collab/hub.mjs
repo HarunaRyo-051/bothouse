@@ -90,9 +90,9 @@ export class Hub {
     this.emit({ type: 'thinking', room_id: roomId, members: [...set] });
   }
 
-  memberView() {
+  memberView(roomId) {
     return this.memberList().map(({ id, name, kind, online, model, cli, permissionPreset, persona, nameCustomized, avatar, avatarVersion, source, error, rooms }) => ({
-      id, name, kind, ...(this.store.closed ? {} : { noDispatch: this.store.noDispatchAnywhere(id) }), ...(rooms ? { rooms } : {}), online: online !== false && !error, ...(error ? { error } : {}), ...(avatar ? { avatar, ...(avatarVersion ? { avatarVersion } : {}) } : {}),
+      id, name, kind, ...(this.store.closed ? {} : { noDispatch: roomId === undefined ? this.store.noDispatchAnywhere(id) : this.store.noDispatch(roomId, id) }), ...(rooms ? { rooms } : {}), online: online !== false && !error, ...(error ? { error } : {}), ...(avatar ? { avatar, ...(avatarVersion ? { avatarVersion } : {}) } : {}),
       ...(kind === 'dsh' ? { model: model ?? null, ...(cli ? { cli, ...(permissionPreset ? { permissionPreset } : {}) } : {}), ...(nameCustomized === undefined ? {} : { nameCustomized }), persona: persona ?? '', editable: source === 'ui' } : {}),
     }));
   }

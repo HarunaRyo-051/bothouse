@@ -433,6 +433,7 @@ export function ChannelsPage({ useChannels, selectRoom, send, reviewTask, create
   const room = state.rooms.find(r => r.id === state.roomId)
   const channelId = room?.parent_id ?? room?.id
   const visibleMembers = state.members.filter(m => !m.rooms?.length || (channelId !== undefined && m.rooms.includes(channelId)))
+    .map(m => ({ ...m, noDispatch: channelId === undefined ? m.noDispatch : state.noDispatchByRoom?.[channelId]?.[m.id] ?? m.noDispatch }))
   const openTaskOwners = new Set(
     (state.tasks ?? []).filter(t => ['assigned', 'accepted', 'asked', 'rework'].includes(t.status)).map(t => t.owner)
   )

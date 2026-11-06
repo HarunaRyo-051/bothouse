@@ -250,6 +250,7 @@ export interface ChannelSnapshot {
   readonly members: readonly ChannelMember[]
   /** Room id → ids of members currently working there. */
   readonly thinking: Readonly<Record<string, readonly string[]>>
+  readonly noDispatchByRoom?: Readonly<Record<string, Readonly<Record<string, boolean>>>>
   /** Selected room's messages, ascending by id. */
   readonly messages: readonly ChannelMessage[]
   /** The selected primary role for the collab service, or null when no role is connected. */
@@ -336,6 +337,7 @@ type ServiceEvent =
   | { readonly type: 'message'; readonly message: ChannelMessage }
   | { readonly type: 'deleted'; readonly id: number; readonly room_id: number }
   | { readonly type: 'members'; readonly members: readonly ChannelMember[] }
+  | { readonly type: 'no-dispatch'; readonly room_id: number; readonly member_id: string; readonly blocked: boolean }
   | { readonly type: 'thinking'; readonly room_id: number; readonly members: readonly string[] }
   | { readonly type: 'rooms'; readonly rooms: readonly ChannelRoom[] }
   | { readonly type: 'room-settings'; readonly room_id: number; readonly lead_id: string | null; readonly effective_lead_id: string | null; readonly workspace_path: string; readonly max_relay?: number }
@@ -470,6 +472,10 @@ export function createChannelSource(transport: ChannelTransport): {
             }
           : current
       case 'members': return { ...current, members: event.members }
+      case 'no-dispatch': return { ...current, noDispatchByRoom: {
+        ...current.noDispatchByRoom,
+        [event.room_id]: { ...current.noDispatchByRoom?.[event.room_id], [event.member_id]: event.blocked },
+      } }
       case 'thinking': return { ...current, thinking: { ...current.thinking, [String(event.room_id)]: event.members } }
       case 'rooms': return { ...current, rooms: event.rooms.map(r => ({ ...current.rooms.find(old => old.id === r.id), ...r })) }
       case 'room-settings': return { ...current, rooms: current.rooms.map(r => r.id === event.room_id || r.parent_id === event.room_id ? { ...r, lead_id: event.lead_id, effective_lead_id: event.effective_lead_id, workspace_path: event.workspace_path, max_relay: event.max_relay ?? r.max_relay } : r) }
@@ -530,7 +536,7 @@ export function createChannelSource(transport: ChannelTransport): {
     const previous = snapshot
     const current = (): boolean => lifetime === owner && pending === read && !read.controller.signal.aborted
     try {
-      const state = await request<{ rooms: ChannelRoom[]; members: ChannelMember[]; thinking: Record<string, string[]>; lead_id?: string | null; effective_lead_id?: string | null }>(
+      const state = await request<{ rooms: ChannelRoom[]; members: ChannelMember[]; thinking: Record<string, string[]>; no_dispatch_by_room?: Record<string, Record<string, boolean>>; lead_id?: string | null; effective_lead_id?: string | null }>(
         'collab/api/state', { signal: read.controller.signal },
       )
       if (!current()) return
@@ -599,7 +605,7 @@ export function createChannelSource(transport: ChannelTransport): {
       if (!keepBoard) earlyTasks.clear()
       let next: ChannelSnapshot = {
         phase: 'ready', error: undefined, rooms: state.rooms, roomId,
-        members: state.members, thinking: state.thinking, messages: rows, hasMoreOlder,
+        members: state.members, thinking: state.thinking, noDispatchByRoom: state.no_dispatch_by_room, messages: rows, hasMoreOlder,
         leadId: state.lead_id ?? null, effectiveLeadId: state.effective_lead_id ?? state.lead_id ?? null,
         tasks: keepBoard ? previous.tasks : [], taskChat: keepBoard ? previous.taskChat : undefined,
         outbox: outbox.filter(entry => entry.roomId === roomId),
@@ -829,7 +835,8 @@ export function createChannelSource(transport: ChannelTransport): {
     },
     async setNoDispatch(roomId, id, blocked) {
       await request(`collab/api/rooms/${roomId}/members/${encodeURIComponent(id)}/no-dispatch`, json('PATCH', { no_dispatch: blocked }))
-      set({ members: snapshot.members.map(m => m.id === id ? { ...m, noDispatch: blocked } : m) })
+      const chatId = snapshot.rooms.find(r => r.id === roomId)?.parent_id ?? roomId
+      set({ noDispatchByRoom: { ...snapshot.noDispatchByRoom, [chatId]: { ...snapshot.noDispatchByRoom?.[chatId], [id]: blocked } } })
     },
     async setDispatchMode(roomId, mode) {
       const result = await request<{ dispatch_mode: DispatchMode; dispatch_explicit: boolean }>(`collab/api/rooms/${roomId}/mode`, json('PATCH', { dispatch_mode: mode }))

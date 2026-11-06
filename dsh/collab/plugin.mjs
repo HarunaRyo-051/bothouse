@@ -217,7 +217,9 @@ export async function apply(ctx, rawConfig) {
         effective_lead_id: hub.primaryMember()?.id ?? null,
         rooms: store.roomsView().map(r => ({ ...r, lead_id: store.leadId(r.id), effective_lead_id: hub.primaryIn(r.id)?.id ?? null,
           workspace_path: store.workspacePath(r.id, config.workspacePath) })), members: hub.memberView(),
-        thinking: Object.fromEntries([...hub.thinking].map(([k, v]) => [k, [...v]])) });
+        thinking: Object.fromEntries([...hub.thinking].map(([k, v]) => [k, [...v]])),
+        no_dispatch_by_room: Object.fromEntries(store.roomsView().map(r => [r.id,
+          Object.fromEntries(hub.membersInRoom(r.id).map(m => [m.id, store.noDispatch(r.id, m.id)]))])) });
     }
     if (path === '/collab/api/events' && req.method === 'GET') return events(req, res);
     if (path === '/collab/api/lead' && req.method === 'GET') {
@@ -378,7 +380,7 @@ export async function apply(ctx, rawConfig) {
       if (!hub.membersInRoom(roomId).some(m => m.id === id)) throw new CollabError('member-missing', `member ${id} does not belong to room ${roomId}`);
       if (typeof body?.no_dispatch !== 'boolean') throw new CollabError('invalid', 'no_dispatch must be boolean');
       store.setNoDispatch(roomId, id, body.no_dispatch);
-      hub.emit({ type: 'members', members: hub.memberView() });
+      hub.emit({ type: 'no-dispatch', room_id: store.settingsRoom(roomId), member_id: id, blocked: store.noDispatch(roomId, id) });
       return { member_id: id, no_dispatch: store.noDispatch(roomId, id) };
     });
     if (path === '/collab/api/members' && req.method === 'POST') {
