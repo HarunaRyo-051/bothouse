@@ -174,6 +174,36 @@ class Increments(unittest.TestCase):
         finally:
             os.environ["CC_BIN"] = "false"
 
+    def test_self_pause_in_own_workspace_records_request(self):
+        log = Path(TMP) / "selfpark.log"
+        log.write_text("")
+        fake = Path(TMP) / "fakeselfpark"
+        fake.write_text(f"#!/bin/sh\necho \"$@\" >> {log}\necho '{{\"freed\":true}}'\n")
+        fake.chmod(0o755)
+        os.environ["CC_BIN"] = str(fake)
+        board.set_prune_conf(on=False)
+        try:
+            board.add("交来的活", "n.md", "已交接", "工作区1主角色", ws="discord:ws1", chat="discord:ch1")
+            os.environ["CC_SESSION_KEY"] = "discord:ws1:u1"
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                board.main(["pause", "1", "十分钟上限"])
+            self.assertIn("[report] #1", buf.getvalue())
+            it = board.items()[0]
+            self.assertEqual(it.get("pause_req"), "十分钟上限")
+            self.assertFalse(it.get("paused"))
+            self.assertEqual(it.get("ws"), "discord:ws1")
+            self.assertEqual(log.read_text(), "")
+            os.environ["CC_SESSION_KEY"] = "discord:ch1:u1"
+            board.main(["pause", "1"])
+            it = board.items()[0]
+            self.assertTrue(it.get("paused"))
+            self.assertNotIn("pause_req", it)
+            self.assertIn("--stop", log.read_text().split())
+        finally:
+            os.environ.pop("CC_SESSION_KEY", None)
+            os.environ["CC_BIN"] = "false"
+
     def test_park_names_chat_and_task(self):
         """审查 pr261-code.md 第 1 条：pause / 把「谁」改走时 park 带上交活的聊天频道和绑定时刻，桥只放这一件；
         工作区已归别的聊天频道（假桥按 --chat 判）时桥拒绝，什么都不放。没记聊天频道的绑定条目不动桥。"""

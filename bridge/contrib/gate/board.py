@@ -388,6 +388,8 @@ def pause(nid, why=None):
         hit["paused"] = hit["at"] = _now()
         hit["paused_at"] = _bound_now()
         hit["paused_by"] = os.environ.get("CC_PROJECT", "")
+        hit.pop("pause_req", None)
+        hit.pop("pause_req_at", None)
         hit.pop("unpruned", None)  # 重新暂停：自动收起按新的暂停重新判（见 prune_why）
         ws = hit.pop("ws", None)  # 交接已放回桥（main 里 park）；ws_was 留着，resume 时向桥收回（reoccupy）
         if ws:
@@ -401,6 +403,29 @@ def pause(nid, why=None):
         _write(cur)
     _del_timer(tid)
     return {**hit, "ws": ws} if ws else hit
+
+
+def _in_own_workspace(it):
+    """This turn runs in the channel bound to this board item's workspace."""
+    here = os.environ.get("CC_SESSION_KEY", "").split(":")[1:2]
+    return bool(here) and bool(it.get("ws")) and here == it["ws"].split(":")[1:2]
+
+
+def self_pause(nid, why=None):
+    """Defer an in-workspace pause until its current turn can deliver a report."""
+    with _locked():
+        cur = _read()
+        hit = next((i for i in cur if i["id"] == nid), None)
+        if hit is None or hit.get("paused") or not _in_own_workspace(hit):
+            return None
+        hit["pause_req"] = why or "工作区自己停手"
+        hit["pause_req_at"] = _bound_now()
+        hit["at"] = _now()
+        _write(cur)
+        event(nid, "pause_req", hit, why)
+    if os.path.isfile(hit.get("where") or ""):
+        append_forward(hit["where"], f"{_now()} 工作区自己停手（#{nid}）{'：' + why if why else ''}。这一轮交 [report] 说做到哪。")
+    return hit
 
 
 def _ws_key(it):
@@ -750,6 +775,8 @@ def returned(nid, reviewer, at=None, bound=None, receipt=None):
         hit["returned_at"] = datetime.fromisoformat(re.sub(r"\.\d+", lambda m: m[0][:7].ljust(7, "0"), at).replace("Z", "+00:00")).isoformat() if at else _bound_now()
         hit["reviewer"] = hit.get("dispatcher") or reviewer
         hit.pop("review_rejected", None)  # A new handback supersedes the earlier rejection.
+        hit.pop("pause_req", None)
+        hit.pop("pause_req_at", None)
         hit["status"], hit["at"] = "已交回待验收", _now()
         if hit.get("chat"):
             hit["sk"] = hit["chat"]
@@ -1295,6 +1322,11 @@ def main(argv):
                 print(hint)
         elif cmd == "pause" and 2 <= len(argv) <= 3:
             nid = int(argv[1].lstrip("#"))
+            req = self_pause(nid, argv[2] if len(argv) > 2 else None)
+            if req:
+                print(f"已记停手（#{nid}）：工作区里不自己暂停。这一轮最后一条回复第一行写 [report] #{nid}，"
+                      "说做到哪、卡在哪、要谁定；交回后桥自动放回工作区。")
+                return
             hit = pause(nid, argv[2] if len(argv) > 2 else None)
             if not hit:
                 sys.exit(f"没有 #{nid}，先跑 board 看编号")
@@ -1303,9 +1335,7 @@ def main(argv):
                 append_forward(hit["where"], f"{_now()} 已暂停（#{nid}）{'：' + hit['pause_why'] if hit.get('pause_why') else ''}。"
                                              "停手，不要再起后台命令，正在跑的停掉；上面更早的「接着做」作废，等主频道恢复再做。")
             schedule_prune_check(hit)
-            # 在那个工作区里自己 pause 的不打断（会把正在跑 board 的这一轮掐掉）
-            here = os.environ.get("CC_SESSION_KEY", "").split(":")[1:2]
-            freed = park_workspace(hit, stop=(here != (hit.get("ws") or "").split(":")[1:2]))
+            freed = park_workspace(hit, stop=True)
             if freed is not None:
                 print("工作区已放回池子，会话已清" if freed else "工作区里还有别的活，先不放回")
         elif cmd == "ask" and len(argv) == 2:
