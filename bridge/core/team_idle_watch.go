@@ -216,13 +216,16 @@ func watchIsHandback(text string) bool {
 	return false
 }
 
+var watchBoardClosedDone = regexp.MustCompile(`(?i)^done\b`)
+
 func watchBoardClosed(it teamTaskBoardItem) bool {
-	for _, status := range []string{"已验收", "验收通过", "已收口", "已完成", "已结束"} {
-		if strings.Contains(it.Status, status) {
+	status := strings.TrimSpace(it.Status)
+	for _, word := range []string{"已验收", "验收通过", "已收口", "已完成", "已结束"} {
+		if strings.HasPrefix(status, word) {
 			return true
 		}
 	}
-	return false
+	return watchBoardClosedDone.MatchString(status)
 }
 
 // watchTurnEnded runs before finishPublicProgress: automatic card completion is
