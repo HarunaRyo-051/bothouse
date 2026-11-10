@@ -422,7 +422,6 @@ def self_pause(nid, why=None):
         hit["pause_req_at"] = _bound_now()
         hit["at"] = _now()
         _write(cur)
-        event(nid, "pause_req", hit, why)
     if os.path.isfile(hit.get("where") or ""):
         append_forward(hit["where"], f"{_now()} 工作区自己停手（#{nid}）{'：' + why if why else ''}。这一轮交 [report] 说做到哪。")
     return hit
