@@ -273,6 +273,27 @@ def pick_pool(chat: str, task: str = "", preferred: str = ""):
 
 
 SOURCE = "原话出处（程序附）"
+
+
+def notes_chat(notes: str, chat: str) -> str:
+    """Use the source chat in handoff notes when it names another non-workspace chat."""
+    at = notes.find(f"## {SOURCE}")
+    m = re.search(r"^- 聊天频道：(\S+:\S+)\s*$", notes[at:] if at >= 0 else "", re.M)
+    if not m or not chat or ":" not in chat:
+        return chat
+    want = m.group(1)
+    if want == chat or want.split(":", 1)[0] != chat.split(":", 1)[0]:
+        return chat
+    # Workspace sessions have a parent in the pool; do not reroute from or to one.
+    try:
+        if ws_cmd(chat, "list").get("parent") or ws_cmd(want, "list").get("parent"):
+            return chat
+    except SystemExit:
+        return chat
+    print(f"ws-handoff: 交接文件写的聊天频道是 {want}，不是跑命令的 {chat}；这件活记到 {want}", file=sys.stderr)
+    return want
+
+
 _STAMP = re.compile(r"(\d{1,2})-(\d{1,2})\s+(\d{1,2}):(\d)([\dxX])")
 
 
@@ -594,7 +615,7 @@ def main(argv):
     # 交活前按原话和总目标搜旧定案，追加成交接的「旧定案（程序搜出）」节；搜不到写「没搜到」，出错跳过，都不拦交活
     if _recall.append_to(path):
         print(f"ws-handoff: 已附「{_recall.SECTION}」", file=sys.stderr)
-    chat = os.environ.get("CC_SESSION_KEY") or os.environ.get("CC_SESSION", "")
+    chat = notes_chat(notes, os.environ.get("CC_SESSION_KEY") or os.environ.get("CC_SESSION", ""))
     if append_source(path, chat):
         print(f"ws-handoff: 已附「{SOURCE}」", file=sys.stderr)
     parent = ""  # 走共享池时交接记在桥里的聊天频道；叫醒失败按它撤掉刚 claim 的那件

@@ -20,6 +20,16 @@ class Drain(unittest.TestCase):
         self.mod = runpy.run_path(str(Path(__file__).with_name("ws-handoff")))
         self.g = self.mod["drain"].__globals__
 
+    def test_notes_chat_follows_source_channel(self):
+        notes = "## 原话出处（程序附）\n- 聊天频道：room:source\n- 时间窗：x\n"
+        def list_ws(chat, *args):
+            return {"parent": "room:main"} if chat == "room:ws" else {}
+        with patch.dict(self.g, {"ws_cmd": list_ws}):
+            self.assertEqual(self.mod["notes_chat"](notes, "room:main"), "room:source")
+            self.assertEqual(self.mod["notes_chat"](notes, "room:ws"), "room:ws")
+            self.assertEqual(self.mod["notes_chat"](notes.replace("room:source", "room:ws"), "room:main"), "room:main")
+            self.assertEqual(self.mod["notes_chat"](notes.replace("room:source", "feishu:other"), "room:main"), "room:main")
+
     def test_paused_item_keeps_position_and_resumes_before_later_work(self):
         queue = Path(self.g["QUEUE"])
         queue.parent.mkdir(parents=True, exist_ok=True)

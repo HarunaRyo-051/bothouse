@@ -95,6 +95,23 @@ func (e *Engine) workspaceParent(channelID string) (string, bool) {
 	return parent, true
 }
 
+// itemChatParent prefers the board item's chat for a late reply after a workspace changes owner.
+func (e *Engine) itemChatParent(platform, ws, parent string, hid int, item *teamTaskBoardItem) string {
+	if item == nil || item.ID != hid || item.Chat == "" {
+		return parent
+	}
+	plat, id, full := strings.Cut(item.Chat, ":")
+	if !full || plat != platform || id == "" || id == ws || id == parent {
+		return parent
+	}
+	if _, isWorkspace := e.workspaceParent(id); isWorkspace {
+		return parent
+	}
+	slog.Info("team exit: task chat differs from current workspace owner",
+		"board_item", hid, "workspace", ws, "owner", parent, "parent", id)
+	return id
+}
+
 // workspaceOwner is the chat that owns workspace channelID right now.
 func (e *Engine) workspaceOwner(channelID string) (string, bool) {
 	e.teamExit.mu.Lock()
@@ -233,6 +250,7 @@ func (e *Engine) forwardWorkspaceExitContext(ctx context.Context, p Platform, se
 	if _, id, full := strings.Cut(parent, ":"); full {
 		parent = id
 	}
+	parent = e.itemChatParent(p.Name(), ws, parent, hid, item)
 	rec, ok := p.(ReplyContextReconstructor)
 	if !ok {
 		slog.Error("team exit: platform cannot rebuild a reply context", "platform", p.Name(), "workspace", ws)
