@@ -277,8 +277,9 @@ SOURCE = "原话出处（程序附）"
 
 def notes_chat(notes: str, chat: str) -> str:
     """Use the source chat in handoff notes when it names another non-workspace chat."""
-    at = notes.find(f"## {SOURCE}")
-    m = re.search(r"^- 聊天频道：(\S+:\S+)\s*$", notes[at:] if at >= 0 else "", re.M)
+    source = notes.split(f"## {SOURCE}\n", 1)
+    section = source[1].split("\n## ", 1)[0] if len(source) == 2 else ""
+    m = re.search(r"^- 聊天频道：(\S+:\S+)\s*$", section, re.M)
     if not m or not chat or ":" not in chat:
         return chat
     want = m.group(1)

@@ -29,6 +29,7 @@ class Drain(unittest.TestCase):
             self.assertEqual(self.mod["notes_chat"](notes, "room:ws"), "room:ws")
             self.assertEqual(self.mod["notes_chat"](notes.replace("room:source", "room:ws"), "room:main"), "room:main")
             self.assertEqual(self.mod["notes_chat"](notes.replace("room:source", "feishu:other"), "room:main"), "room:main")
+            self.assertEqual(self.mod["notes_chat"]("## 原话出处（程序附）\n- 时间窗：x\n## 下一节\n- 聊天频道：room:source\n", "room:main"), "room:main")
 
     def test_paused_item_keeps_position_and_resumes_before_later_work(self):
         queue = Path(self.g["QUEUE"])
