@@ -1,5 +1,5 @@
 """任务板（board.py）和它进每轮上下文（ctxsvc.board_items）的最小测试：python3 -I test_board.py"""
-import json, os, subprocess, sys, tempfile, unittest
+import contextlib, io, json, os, subprocess, sys, tempfile, unittest
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
