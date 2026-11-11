@@ -1,4 +1,4 @@
-// dsh-client-source-sha256: ce0593a2fb1c5037c7a251081ab40298f0a9168d33cfeb2b23586c3dee726578
+// dsh-client-source-sha256: 3d514c6c82329dfe92e231bea638b93935ac408af7e8281ecc7353bc8cfdb7f0
 // dsh-style-sha256: c15f13cd91d62ca36feac5bdc1a0d87fccdad9831985d49326c86efc37c17917
 window.__ModuleLoader__.load({
  id: "@deepseek-ai/dsh-experimental-client-ui-discord",
@@ -590,8 +590,13 @@ function createChannelSource(transport) {
 			async answerAsk(id, text) {
 				const roomId = snapshot.roomId;
 				const epoch = historyEpoch;
+				const version = asksVersion;
 				const result = await request(`collab/api/asks/${id}/answer`, json("POST", { text }));
-				if (snapshot.roomId === roomId && historyEpoch === epoch) set({ asks: result.asks });
+				if (snapshot.roomId === roomId && historyEpoch === epoch) {
+					const asks = asksVersion === version ? result.asks : (snapshot.asks ?? []).filter((ask) => ask.id !== id);
+					asksVersion += 1;
+					set({ asks });
+				}
 			},
 			async reviewTask(id, verdict, note) {
 				const { task } = await request(`collab/api/tasks/${id}/review`, json("POST", {
@@ -6305,7 +6310,7 @@ function factoryLabel(effects, ok, nok, type, markerType, stringType) {
 	* @type {State}
 	*/
 	function atBreak(code) {
-		if (size > 999 || code === null || code === 91 || code === 93 && !seen || 
+		if (size > 999 || code === null || code === 91 || code === 93 && !seen ||
 		/* c8 ignore next 3 */
 		code === 94 && !size && "_hiddenFootnoteSupport" in self.parser.constructs) return nok(code);
 		if (code === 93) {

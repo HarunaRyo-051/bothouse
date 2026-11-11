@@ -83,6 +83,9 @@ if (body.includes('window.__ModuleLoader__.load(')) process.exit(0)
 // is installed through a hoisted node_modules, that label leaks the checkout location and
 // makes byte-identical rebuilds impossible. The labels are diagnostics only.
 body = body.replace(/^\/\/ .*node_modules\/.*(?:\r?\n|$)/gm, '')
+// Rolldown emits a trailing space on this dependency's continued condition.
+// Target that code line only; trimming all lines could change template literal content.
+body = body.replace(/^(\s*if \(size > 999 \|\| code === null \|\| code === 91 \|\| code === 93 && !seen \|\|)[ \t]+$/gm, '$1')
 
 const css = readFileSync(cssFile, 'utf8')
 const source = sourceDigest()

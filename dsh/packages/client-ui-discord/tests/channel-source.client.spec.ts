@@ -35,6 +35,26 @@ function deferred<T>() {
 const state = { rooms: [{ id: 1, name: 'general' }, { id: 2, name: 'other' }], members: [], thinking: {} }
 
 describe('channel source', () => {
+  it('preserves newer SSE questions when an older answer response arrives', async () => {
+    const first = { id: 'ask-12345678', text: 'First' }
+    const next = { id: 'ask-87654321', text: 'New question' }
+    const response = deferred<Response>()
+    const { transport, streams } = fakeTransport(url => {
+      if (url === '/collab/api/state') return json(200, state)
+      if (url.endsWith('/asks')) return json(200, { asks: [first] })
+      if (url.endsWith('/answer')) return response.promise
+      return json(200, { messages: [] })
+    })
+    const { source, actions } = createChannelSource(transport)
+    const unsubscribe = source.subscribe(() => {})
+    await vi.waitFor(() => expect(source.getSnapshot().asks).toEqual([first]))
+    const sending = actions.answerAsk(first.id, 'Answer')
+    streams[0].onmessage?.({ data: JSON.stringify({ type: 'asks', room_id: 1, asks: [next] }) } as MessageEvent)
+    response.resolve(json(200, { asks: [] }))
+    await sending
+    expect(source.getSnapshot().asks).toEqual([next])
+    unsubscribe()
+  })
   it('loads unanswered asks, answers them and accepts live inbox updates', async () => {
     const ask = { id: 'ask-12345678', text: 'Choose a color' }
     const { transport, streams, calls } = fakeTransport((url, init) => {

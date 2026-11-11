@@ -804,8 +804,14 @@ export function createChannelSource(transport: ChannelTransport): {
     async answerAsk(id, text) {
       const roomId = snapshot.roomId
       const epoch = historyEpoch
+      const version = asksVersion
       const result = await request<{ asks: ChannelAsk[] }>(`collab/api/asks/${id}/answer`, json('POST', { text }))
-      if (snapshot.roomId === roomId && historyEpoch === epoch) set({ asks: result.asks })
+      if (snapshot.roomId === roomId && historyEpoch === epoch) {
+        // A newer inbox (SSE or another answer) must not be replaced by this response.
+        const asks = asksVersion === version ? result.asks : (snapshot.asks ?? []).filter(ask => ask.id !== id)
+        asksVersion += 1
+        set({ asks })
+      }
     },
     async reviewTask(id, verdict, note) {
       const { task } = await request<{ task: ChannelTask }>(`collab/api/tasks/${id}/review`, json('POST', { verdict, note }))
