@@ -5,7 +5,10 @@ export const NS = 'discord-channels'
 
 /** Simplified Chinese dictionary and key source. */
 export const zh = {
+  approvalCount: '{count} 个权限待批准',
+  failureCount: '{count} 个失败待处理',
   askCount: '{count} 个问题待答复',
+  askSection: '待答复问题',
   askWaiting: '等了 {minutes} 分钟',
   askReply: '答复',
   askExpand: '展开',
@@ -222,7 +225,10 @@ export const zh = {
 
 /** English dictionary. */
 export const en: Record<keyof typeof zh, string> = {
+  approvalCount: '{count} permissions awaiting approval',
+  failureCount: '{count} failures needing attention',
   askCount: '{count} questions awaiting answers',
+  askSection: 'Questions awaiting answers',
   askWaiting: 'Waiting {minutes} minutes',
   askReply: 'Answer',
   askExpand: 'Expand',

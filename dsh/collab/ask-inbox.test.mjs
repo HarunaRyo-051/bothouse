@@ -5,6 +5,7 @@ import { Store } from './store.mjs';
 import { Hub } from './hub.mjs';
 import { TeamExit } from './team-exit.mjs';
 import { asksRoute } from './plugin.mjs';
+import { ChannelApprovals } from './approvals.mjs';
 
 const tick = () => new Promise(resolve => setImmediate(resolve));
 test('ask inbox lists only this channel, delivers answers, rearms watch and deduplicates', async () => {
@@ -26,6 +27,21 @@ test('ask inbox lists only this channel, delivers answers, rearms watch and dedu
       await asksRoute(req, res, path, { store, hub, ownerName: 'Owner' });
       return { status, ...result };
     }
+    const approvals = ChannelApprovals.of(hub);
+    const permission = approvals.open({ room: ws.id, author: { id: 'ds', name: 'Astra' }, text: 'run tests' });
+    const trigger = hub.post(ws.id, { authorKind: 'user', author: 'owner', name: 'Owner', text: 'test' }).message;
+    const job = store.addJob('ds', ws.id, trigger.id);
+    store.finishJob(job.id, 'failed');
+    hub.post(ws.id, { authorKind: 'system', author: 'system', name: 'system', text: 'model unavailable', card: JSON.stringify({ state: 'failed', action: 'configure-model', job_id: job.id, member_id: 'ds' }) });
+    const pending = await request('GET', '/collab/api/rooms/1/pending');
+    assert.equal(pending.ask.length, 1);
+    assert.equal(pending.approval.length, 1);
+    assert.equal(pending.failed.length, 1);
+    assert.equal(pending.approval[0].message_id, permission.messageId);
+    assert.equal(pending.failed[0].job_id, job.id);
+    assert.deepEqual((await request('GET', '/collab/api/rooms/2/pending')).approval, []);
+    approvals.decide(permission.messageId, 'deny');
+    assert.deepEqual((await request('GET', '/collab/api/rooms/1/pending')).approval, []);
     const list = await request('GET', '/collab/api/rooms/1/asks');
     assert.equal(list.asks.length, 1);
     const ask = list.asks[0];
@@ -42,7 +58,7 @@ test('ask inbox lists only this channel, delivers answers, rearms watch and dedu
     assert.deepEqual((await request('POST', `/collab/api/asks/${ask.id}/answer`, { text: '选蓝色' })).asks, []);
     await tick();
     assert.equal(rearmed, 1);
-    assert.equal(store.page(ws.id).filter(m => m.author_kind === 'user').length, 1);
+    assert.equal(store.page(ws.id).filter(m => m.author_kind === 'user' && m.text.includes('选蓝色')).length, 1);
     assert.deepEqual((await request('GET', '/collab/api/rooms/1/asks')).asks, []);
   } finally { store.close(); }
 });
