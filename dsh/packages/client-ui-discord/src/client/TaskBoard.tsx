@@ -22,7 +22,7 @@ function Status({ status, t }: { status: TaskStatus; t: T }) {
  * Right-column board for the selected chat channel.
  * @param onOpen - jump to a message in a room (dispatch or delivery).
  */
-export function TaskBoard({ tasks, rooms, chatId, roomId, t, onOpen, onReview }: {
+export function TaskBoard({ tasks, rooms, chatId, roomId, t, onOpen, onReview, onRelocate }: {
   tasks: readonly ChannelTask[]
   rooms: readonly ChannelRoom[]
   chatId: number | undefined
@@ -30,6 +30,7 @@ export function TaskBoard({ tasks, rooms, chatId, roomId, t, onOpen, onReview }:
   t: T
   onOpen: (roomId: number, messageId: number) => void
   onReview?: (id: number, verdict: 'done' | 'rework', note?: string) => Promise<void>
+  onRelocate?: (id: number) => Promise<void>
 }) {
   const [opened, setOpened] = useState(false)
   const [selectedTab, setSelectedTab] = useState(BOARD_TABS.find(tab => tab.initial)!.id)
@@ -90,6 +91,12 @@ export function TaskBoard({ tasks, rooms, chatId, roomId, t, onOpen, onReview }:
       <div className={css.taskLinks}>
         {task.assign_msg_id !== null && <button type="button" className={css.linkButton} onClick={() => { jump(task.room_id, task.assign_msg_id as number) }}>{t('taskOpenAssign')}</button>}
         {task.result_msg_id !== null && <button type="button" className={css.linkButton} onClick={() => { jump(task.room_id, task.result_msg_id as number) }}>{t('taskOpenResult')}</button>}
+        {onRelocate !== undefined && task.paused_at != null && task.paused_chat === chatId
+          && rooms.some(room => room.id === task.room_id && room.parent_id !== chatId)
+          && <button type="button" className={css.linkButton} disabled={saving} onClick={() => {
+            setSaving(true); setError(undefined)
+            void onRelocate(task.id).catch(error => { setError(error instanceof Error ? error.message : String(error)) }).finally(() => { setSaving(false) })
+          }}>{t('taskRelocate')}</button>}
         {onReview !== undefined && ['returned', 'declined', 'escalated'].includes(task.status) && <>
           <button type="button" className={css.linkButton} disabled={saving} onClick={() => { void review(task.id, 'done') }}>{t('taskApprove')}</button>
           <button type="button" className={css.linkButton} disabled={saving} onClick={() => { setReviewing(task.id); setReason(''); setError(undefined) }}>{t('taskSendBack')}</button>

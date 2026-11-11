@@ -199,7 +199,7 @@ export function groupRooms(rooms: readonly ChannelRoom[]): RoomRow[] {
 }
 
 /** Task statuses (dsh/collab/tasks.mjs STATUS). */
-export type TaskStatus = 'assigned' | 'accepted' | 'asked' | 'declined' | 'escalated' | 'returned' | 'done' | 'rework'
+export type TaskStatus = 'assigned' | 'accepted' | 'asked' | 'declined' | 'escalated' | 'returned' | 'done' | 'rework' | 'cancelled' | 'superseded'
 
 /** One dispatched task (#139 team mode B), as `GET /collab/api/rooms/:id/tasks` serializes it. */
 export interface ChannelTask {
@@ -223,6 +223,8 @@ export interface ChannelTask {
   readonly created_at: number
   readonly updated_at: number
   readonly returned_at: number | null
+  readonly paused_at?: number | null
+  readonly paused_chat?: number | null
 }
 
 /** One message the human sent that the service has not confirmed yet. */
@@ -298,6 +300,7 @@ export interface ChannelSnapshot {
 export interface ChannelActions {
   answerAsk(id: string, text: string): Promise<void>
   reviewTask(id: number, verdict: 'done' | 'rework', note?: string): Promise<void>
+  relocateTask(id: number): Promise<void>
   /** Show another room and load its recent messages. */
   selectRoom(roomId: number): Promise<void>
   /** Post one human message into the selected room, optionally replying to `replyTo`; rejects with the service's reason. */
@@ -843,6 +846,10 @@ export function createChannelSource(transport: ChannelTransport): {
     },
     async reviewTask(id, verdict, note) {
       const { task } = await request<{ task: ChannelTask }>(`collab/api/tasks/${id}/review`, json('POST', { verdict, note }))
+      set({ tasks: (snapshot.tasks ?? []).map(row => row.id === task.id ? task : row) })
+    },
+    async relocateTask(id) {
+      const { task } = await request<{ task: ChannelTask }>(`collab/api/tasks/${id}/relocate`, json('POST', {}))
       set({ tasks: (snapshot.tasks ?? []).map(row => row.id === task.id ? task : row) })
     },
     selectRoom,

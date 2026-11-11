@@ -235,6 +235,9 @@ test('channel primary: task dispatch, handback and acceptance use the channel le
   assert.equal(tasks.task(task.id).status, 'returned');
   hub.post(1, { authorKind: 'role', author: 'local', name: 'local', text: 'accepted' });
   await tick();
+  assert.equal(tasks.task(task.id).status, 'returned');
+  hub.post(1, { authorKind: 'role', author: 'local', name: 'local', text: `【验收】#${task.id}` });
+  await tick();
   assert.equal(tasks.task(task.id).status, 'done');
   hub.post(2, { authorKind: 'role', author: 'global', name: 'global', text: '@worker implement inherited settings' });
   await tick();
@@ -3105,6 +3108,44 @@ test('team workspace park: a paused task does not resume into a workspace anothe
   assert.deepEqual(tasks.list(2).map(t => t.id), []);
 });
 
+test('paused work relocates from a workspace claimed by another chat without changing its task id', async () => {
+  const hub = makeHub();
+  hub.store.ensureRoom(2, 'other');
+  hub.setMember({ id: 'ds', name: 'DeepSeek', kind: 'dsh', online: true });
+  hub.setMember({ id: 'lead', name: 'Lead', kind: 'dsh', online: true });
+  const tasks = new Tasks(hub, { setTimer: () => ({}), clearTimer() {} });
+  hub.tasks = tasks;
+  hub.teamExit = new TeamExit(hub);
+  const first = hub.store.createWorkspace(1);
+  const task = tasks.assign({ roomId: first.id, title: '继续原任务', owner: 'ds', actor: 'lead' });
+  const question = hub.post(first.id, { authorKind: 'role', author: 'ds', name: 'DeepSeek',
+    text: `[ask] #${task.id} 背景：原任务。\n已经检查。\n要你做的：选择方案。\n我加的：无\n自验：无需\n类别：方向` }).message;
+  await settle();
+  const ask = hub.store.db.prepare('SELECT * FROM team_exit_asks WHERE source_id = ?').get(question.id);
+  assert.ok(ask);
+  tasks.pauseTask(task.id);
+  hub.store.createWorkspace(2);
+  assert.throws(() => tasks.relocate(task.id, { actor: 'ds' }), /only the dispatcher/);
+  const moved = tasks.relocate(task.id, { actor: 'lead' });
+  assert.equal(moved.id, task.id);
+  assert.notEqual(moved.room_id, first.id);
+  assert.equal(moved.paused_at, null);
+  assert.equal(hub.store.workspaceOwner(first.id), 2, 'other chat keeps its claim');
+  assert.equal(hub.store.workspaceOwner(moved.room_id), 1);
+  assert.match(hub.store.message(moved.assign_msg_id).text, /原交接/);
+  assert.equal(tasks.list(1).some(t => t.id === task.id), true);
+  assert.equal(tasks.list(2).some(t => t.id === task.id), false);
+  assert.equal(hub.store.db.prepare('SELECT workspace_id FROM team_exit_asks WHERE id = ?').get(ask.id).workspace_id, moved.room_id);
+  hub.post(1, { authorKind: 'user', author: 'owner', name: 'Owner', text: '选 A', replyTo: ask.forwarded_id });
+  await settle();
+  assert.equal(hub.store.db.prepare('SELECT answered FROM team_exit_asks WHERE id = ?').get(ask.id).answered, 1);
+  assert.ok(hub.store.page(moved.room_id).some(m => m.client_key?.startsWith('team-answer:')));
+  const { message } = hub.post(moved.room_id, { authorKind: 'role', author: 'ds', name: 'DeepSeek', text: '[report] done' });
+  assert.equal(tasks.handBack(task.id, { actor: 'ds', messageId: message.id }).status, 'returned');
+  assert.equal(hub.store.workspaceOwner(moved.room_id), null);
+  tasks.close(); hub.store.close();
+});
+
 test('team workspace park: a workspace with one paused and one accepted task stays busy for a plain release', async () => {
   const hub = makeHub();
   const ws = hub.store.createWorkspace(1);
@@ -3734,7 +3775,7 @@ function route(hub, gateway, dsh) {
   };
 }
 
-test('tasks: the lead @-ing teammates opens board tasks; their reply to the lead hands back; the lead\'s next message accepts', async () => {
+test('tasks: a chat-side hand-back waits for explicit review, not the lead\'s next message', async () => {
   const { hub, tasks } = makeTasks();
   hub.fallbackLead = 'lead';
   hub.setMember({ id: 'gpt', name: '龙娘', kind: 'bot', online: true });
@@ -3763,8 +3804,11 @@ test('tasks: the lead @-ing teammates opens board tasks; their reply to the lead
   say('lead', '橘', '收到，龙娘这份可以');
   await tick();
   list = tasks.list(1);
-  assert.equal(list.find(t => t.owner === 'gpt').status, 'done');
+  assert.equal(list.find(t => t.owner === 'gpt').status, 'returned', 'plain chat is not a review');
   assert.equal(list.find(t => t.owner === 'ds').status, 'assigned');
+  say('lead', '橘', `【验收】#${list.find(t => t.owner === 'gpt').id}`);
+  await tick();
+  assert.equal(tasks.list(1).find(t => t.owner === 'gpt').status, 'done');
   // Teammates' own @s and plain chat never open tasks; API tasks are never auto-accepted.
   say('gpt', '龙娘', '@DeepSeek 你那边呢');
   const api = tasks.assign({ roomId: 1, title: 'api', owner: 'gpt', actor: 'lead' });
@@ -3795,7 +3839,10 @@ test('tasks: a DSH member\'s one-message 【接】 reply is its delivery and han
   say('lead', '橘', '收到');
   await tick();
   list = tasks.list(1);
-  assert.equal(list.find(t => t.owner === 'ds').status, 'done');
+  assert.equal(list.find(t => t.owner === 'ds').status, 'returned');
+  say('lead', '橘', `【验收】#${list.find(t => t.owner === 'ds').id}`);
+  await tick();
+  assert.equal(tasks.list(1).find(t => t.owner === 'ds').status, 'done');
   // 问 keeps the DSH member's turn on it: no hand-back.
   const asked = tasks.assign({ roomId: 1, title: 'q', owner: 'ds', actor: 'lead' });
   say('ds', 'DeepSeek', `@橘 【问】 #${asked.id} 要哪个分支`);
@@ -5085,6 +5132,9 @@ test('G24: an @-dispatched chat task is handed over, not opened twice', async ()
   const open = tasks.list(1).filter(t => ['assigned', 'accepted', 'asked', 'rework'].includes(t.status));
   assert.equal(open.length, 1, 'one open task across chat and workspace');
   assert.equal(open[0].room_id, ws); assert.equal(open[0].owner, 'long');
+  const old = tasks.list(1).find(t => t.room_id === 1);
+  assert.equal(old.status, 'superseded', 'handoff is not acceptance');
+  assert.equal(tasks.task(old.id).superseded_by, open[0].id);
   assert.deepEqual(nudged.map(n => n[0]), ['long']);
   // The system handoff line is not parsed as a chat dispatch either.
   tasks.fromMessage(hub.store.page(ws).at(-1));
@@ -5275,7 +5325,7 @@ test('workspace listing releases an empty owned workspace, not a parked task or 
   hub.store.roomsView();
   assert.equal(hub.store.workspaceOwner(ws.id), 1, 'parked work still owns its claimed workspace');
   const idle = hub.store.createWorkspace(1);
-  hub.store.db.prepare('UPDATE rooms SET claim_task = ? WHERE id = ?').run(pending.id, idle.id);
+  assert.equal(hub.store.db.prepare('SELECT claim_task FROM rooms WHERE id = ?').get(idle.id).claim_task, 0, 'a new claim has no task yet');
   hub.store.roomsView();
   assert.equal(hub.store.workspaceOwner(idle.id), 1, 'a fresh claim has time to open its handoff');
   hub.store.db.prepare('UPDATE rooms SET claim_at = unixepoch() - 1801 WHERE id = ?').run(idle.id);
@@ -5652,8 +5702,8 @@ test('G37: a DSH reply 「@主 [report]」 hands back and its result is copied t
   say(ws.id, '@主 [report]\n已完成，测试 8 个通过');
   await settle();
   assert.equal(tasks.task(t.id).status, 'returned', 'the @-prefixed [report] is a hand-back');
-  const copies = hub.store.page(1, undefined, 50).filter(m => m.author_kind === 'system' && m.text.startsWith('📬'));
-  assert.equal(copies.length, 1, 'one copy in the chat channel');
+  const copies = hub.store.page(1, undefined, 50).filter(m => m.author_kind === 'system' && m.text.includes('测试 8 个通过'));
+  assert.equal(copies.length, 1, 'one result copy in the chat channel');
   assert.match(copies[0].text, /测试 8 个通过/);
   const g = g34Setup();
   const t2 = g.assign();
@@ -5746,7 +5796,7 @@ for (const state of ['returned', 'done']) {
   });
 }
 
-test('r12: a mention task the praise auto-accepts: thanks opens nothing, an @ still dispatches', async () => {
+test('r12: praise does not accept a mention task; thanks opens nothing, an @ still dispatches', async () => {
   const { tasks, say } = g34Setup();
   say(1, '副，把 README 改一下', 'zhu');
   await settle();
@@ -5757,7 +5807,10 @@ test('r12: a mention task the praise auto-accepts: thanks opens nothing, an @ st
   assert.equal(tasks.task(first.id).status, 'returned');
   say(1, R12_REPORT, 'zhu');
   await settle();
-  assert.equal(tasks.task(first.id).status, 'done', 'the lead\'s next message accepts it');
+  assert.equal(tasks.task(first.id).status, 'returned', 'praise does not accept a delivery');
+  say(1, `【验收】#${first.id}`, 'zhu');
+  await settle();
+  assert.equal(tasks.task(first.id).status, 'done');
   say(1, '谢谢');
   await settle();
   assert.equal(tasks.list(1).filter(r => r.owner === 'fu').length, 1, 'praise and thanks open nothing');
@@ -6072,4 +6125,37 @@ test('delegating with standalone verdict examples does not prematurely accept th
   await settle();
   assert.equal(tasks.task(original.id).status, 'returned');
   assert.equal(tasks.list(1).find(t => t.owner === 'reviewer').parent_task, original.id);
+});
+
+// 任务卡住闭环：终止态与「负责人可结束自己的活」
+test('a task owner ends their own task with a reason, and the record says so', () => {
+  const { hub, tasks, ws, assign } = g34Setup();
+  const t = assign();
+  const row = tasks.perform('cancel', { id: t.id, body: { reason: '方案已作废' } }, { actor: 'fu', verified: true });
+  assert.equal(row.status, 'cancelled');
+  assert.equal(tasks.task(t.id).termination_reason, '方案已作废');
+  const record = hub.store.page(ws.id).find(m => m.text.includes('自行结束'));
+  assert.ok(record, 'the ending is recorded as the owner ending it');
+  assert.match(record.text, /方案已作废/);
+});
+
+test('ending a task needs a reason, and only its owner or dispatcher may do it', () => {
+  const { hub, tasks, assign } = g34Setup();
+  const t = assign();
+  assert.throws(() => tasks.perform('cancel', { id: t.id, body: {} }, { actor: 'fu', verified: true }), /原因/);
+  // A different member (not the owner, not the dispatcher) may not end it.
+  hub.setMember({ id: 'pang', name: '旁人', kind: 'dsh', online: true });
+  assert.throws(() => tasks.perform('cancel', { id: t.id, body: { reason: 'x' } }, { actor: 'pang', verified: true }), /接活人|派活人/);
+  assert.equal(tasks.task(t.id).status, 'assigned', 'a refused ending leaves the task alone');
+});
+
+test('a dispatcher cancels and supersedes a task, and the terminal state cannot be overwritten', () => {
+  const { tasks, assign } = g34Setup();
+  const a = assign();
+  const b = tasks.assign({ roomId: a.room_id, title: '替代版', owner: 'fu', actor: 'zhu', force: true });
+  const cancelled = tasks.perform('cancel', { id: a.id, body: { reason: '换方案' } }, { actor: 'zhu', verified: true });
+  assert.equal(cancelled.status, 'cancelled');
+  const superseded = tasks.perform('supersede', { id: b.id, body: { reason: '并入新版', superseded_by: a.id + 0 } }, { actor: 'zhu', verified: true });
+  assert.equal(superseded.status, 'superseded');
+  assert.throws(() => tasks.perform('cancel', { id: b.id, body: { reason: '再来一次' } }, { actor: 'zhu', verified: true }), /already/);
 });

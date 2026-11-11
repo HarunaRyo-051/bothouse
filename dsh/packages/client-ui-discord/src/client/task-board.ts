@@ -12,6 +12,7 @@ export type T = TranslateNS<typeof NS>
 export const STATUS_KEY = {
   assigned: 'taskAssigned', accepted: 'taskAccepted', asked: 'taskAsked', declined: 'taskDeclined',
   escalated: 'taskEscalated', returned: 'taskReturned', done: 'taskDone', rework: 'taskRework',
+  cancelled: 'taskCancelled', superseded: 'taskSuperseded',
 } as const satisfies Record<TaskStatus, string>
 
 /** Single source for tab membership and board ordering; an empty list means all statuses. */
@@ -19,7 +20,7 @@ export const BOARD_TABS: readonly { id: string; label: keyof typeof zh; statuses
   { id: 'all', label: 'taskTabAll', statuses: [] },
   { id: 'working', label: 'taskTabWorking', statuses: ['assigned', 'accepted', 'asked', 'rework'], initial: true },
   { id: 'review', label: 'taskTabReview', statuses: ['returned', 'declined', 'escalated'] },
-  { id: 'done', label: 'taskTabDone', statuses: ['done'] },
+  { id: 'done', label: 'taskTabDone', statuses: ['done', 'cancelled', 'superseded'] },
 ]
 const groupOf = (status: TaskStatus): number => BOARD_TABS.findIndex(g => g.statuses.includes(status))
 
@@ -30,7 +31,7 @@ export function boardOrder(tasks: readonly ChannelTask[]): ChannelTask[] {
 
 /** Seconds a task has taken: until hand-back, until it closed, or until now. */
 export function elapsed(task: ChannelTask, now: number): number {
-  const end = task.returned_at ?? (task.status === 'done' ? task.updated_at : now)
+  const end = task.returned_at ?? (['done', 'cancelled', 'superseded'].includes(task.status) ? task.updated_at : now)
   return Math.max(0, end - task.created_at)
 }
 
@@ -45,7 +46,8 @@ export function formatDuration(seconds: number, t: T): string {
 /** Board sections: open tasks (owner's turn, then waiting for the lead) and finished ones. */
 export function boardGroups(tasks: readonly ChannelTask[]): { open: ChannelTask[]; done: ChannelTask[] } {
   const rows = boardOrder(tasks)
-  return { open: rows.filter(task => task.status !== 'done'), done: rows.filter(task => task.status === 'done') }
+  return { open: rows.filter(task => !['done', 'cancelled', 'superseded'].includes(task.status)),
+    done: rows.filter(task => ['done', 'cancelled', 'superseded'].includes(task.status)) }
 }
 
 /** Task-card rows: the task's owner first, then each sub-task in dispatch order. */

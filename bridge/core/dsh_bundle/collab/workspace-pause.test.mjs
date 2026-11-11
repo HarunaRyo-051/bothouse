@@ -99,7 +99,9 @@ test('an unnumbered [ask] only falls back to the room task after two correction 
     await new Promise(r => setImmediate(r));
     if (attempt < 2) {
       assert.equal(tasks.task(task.id).paused_at, null, 'invalid headline does not park a task yet');
-      assert.equal(hub.store.page(1).some(m => m.text.startsWith('📬')), false);
+      const notices = hub.store.page(1).filter(m => m.text.startsWith('📬'));
+      assert.ok(notices.some(m => m.text.includes('格式需要纠正')), 'channel sees why the ask is blocked');
+      assert.equal(notices.some(m => m.text.includes('要不要合')), false, 'invalid question body is not forwarded');
     }
   }
   assert.ok(tasks.task(task.id).paused_at);

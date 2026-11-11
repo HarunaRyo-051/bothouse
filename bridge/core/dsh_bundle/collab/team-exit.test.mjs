@@ -65,10 +65,12 @@ for (const [name, text, want] of [
   ['missing 类别', '[ask]\n用 A 还是 B？\n自验：go test 通过', '缺「类别：」'],
   ['自验：无需 outside the four', '[ask]\n合不合？\n自验：无需\n类别：验收', '「自验：无需」只限'],
 ]) {
-  test(`[ask] ${name} goes back to the workspace, not the chat channel`, async () => {
+  test(`[ask] ${name} bounces to the workspace and exposes the blocked state in chat`, async () => {
     const { say, chat, back, woken, hub } = setup();
     await say(text);
-    assert.equal(chat().length, 0);
+    assert.equal(chat().length, 1);
+    assert.match(chat()[0].text, new RegExp(want));
+    assert.match(chat()[0].text, /已退回原工作区/);
     const [notice] = back();
     assert.ok(notice, 'bounce notice posted in the workspace');
     assert.match(notice.text, new RegExp(want));

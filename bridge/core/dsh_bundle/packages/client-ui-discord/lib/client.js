@@ -1,4 +1,4 @@
-// dsh-client-source-sha256: f2eaa27f004e8dbe0d4937a7c7ad7730f81e671e753e31952d799354d0863527
+// dsh-client-source-sha256: 9ff7aeeb165f9d0628e6d647085cabb18174704fb0b7b53f53f88aef55ac1261
 // dsh-style-sha256: c15f13cd91d62ca36feac5bdc1a0d87fccdad9831985d49326c86efc37c17917
 window.__ModuleLoader__.load({
  id: "@deepseek-ai/dsh-experimental-client-ui-discord",
@@ -621,6 +621,10 @@ function createChannelSource(transport) {
 					verdict,
 					note
 				}));
+				set({ tasks: (snapshot.tasks ?? []).map((row) => row.id === task.id ? task : row) });
+			},
+			async relocateTask(id) {
+				const { task } = await request(`collab/api/tasks/${id}/relocate`, json("POST", {}));
 				set({ tasks: (snapshot.tasks ?? []).map((row) => row.id === task.id ? task : row) });
 			},
 			selectRoom,
@@ -12389,8 +12393,6 @@ function gfmAutolinkLiteralFromMarkdown() {
 	};
 }
 /**
-* Handle the start of an autolink literal.
-*
 * @this {CompileContext}
 * @type {FromMarkdownHandle}
 */
@@ -12399,13 +12401,10 @@ function enterLiteralAutolink(token) {
 		type: "link",
 		title: null,
 		url: "",
-		children: [],
-		position: void 0
+		children: []
 	}, token);
 }
 /**
-* Handle the start of an autolink literal value.
-*
 * @this {CompileContext}
 * @type {FromMarkdownHandle}
 */
@@ -12413,8 +12412,6 @@ function enterLiteralAutolinkValue(token) {
 	this.config.enter.autolinkProtocol.call(this, token);
 }
 /**
-* Handle the end of an HTTP autolink literal value.
-*
 * @this {CompileContext}
 * @type {FromMarkdownHandle}
 */
@@ -12422,8 +12419,6 @@ function exitLiteralAutolinkHttp(token) {
 	this.config.exit.autolinkProtocol.call(this, token);
 }
 /**
-* Handle the end of a `www` autolink literal value.
-*
 * @this {CompileContext}
 * @type {FromMarkdownHandle}
 */
@@ -12434,8 +12429,6 @@ function exitLiteralAutolinkWww(token) {
 	node.url = "http://" + this.sliceSerialize(token);
 }
 /**
-* Handle the end of an email autolink literal value.
-*
 * @this {CompileContext}
 * @type {FromMarkdownHandle}
 */
@@ -12443,54 +12436,36 @@ function exitLiteralAutolinkEmail(token) {
 	this.config.exit.autolinkEmail.call(this, token);
 }
 /**
-* Handle the end of an autolink literal.
-*
 * @this {CompileContext}
 * @type {FromMarkdownHandle}
 */
 function exitLiteralAutolink(token) {
 	this.exit(token);
 }
-/**
-* Find autolink literals in text and turn them into links.
-*
-* @type {FromMarkdownTransform}
-*/
+/** @type {FromMarkdownTransform} */
 function transformGfmAutolinkLiterals(tree) {
-	findAndReplace(tree, [
-		[/(?<![\da-z])(https?:\/\/|www(?=\.))([\w-]*\.[\w\-.]*)([^\t\n\r ]*)/gi, findUrl],
-		[/(?<![\w+\-.@])xmpp:([\w+\-.]+)@([\w-]+(?:\.[\w-]+)+)(\/(?:[\w\-/]|\.(?=[\dA-Za-z]))*)?/g, findXmpp],
-		[/(?<![\w+\-.@])mailto:([\w+\-.]+)@([\w-]+(?:\.[\w-]+)+)/g, findMailto],
-		[/(?<![\w+\-.]|(?:^|[^\d@A-Za-z])(?:mailto|xmpp):)([\w+\-.]+)@([\w-]+(?:\.[\w-]+)+)/g, findEmail]
-	], { ignore: ["link", "linkReference"] });
+	findAndReplace(tree, [[/(https?:\/\/|www(?=\.))([-.\w]+)([^ \t\r\n]*)/gi, findUrl], [/(?<=^|\s|\p{P}|\p{S})([-.\w+]+)@([-\w]+(?:\.[-\w]+)+)/gu, findEmail]], { ignore: ["link", "linkReference"] });
 }
 /**
-* Turn a URL match into a link.
-*
 * @type {ReplaceFunction}
 * @param {string} _
-*   Whole match.
 * @param {string} protocol
-*   Protocol (`http://`, `https://`) or `www`.
 * @param {string} domain
-*   Host name, up to the path.
 * @param {string} path
-*   Path, query, and fragment.
 * @param {RegExpMatchObject} match
-*   Match object.
 * @returns {Array<PhrasingContent> | Link | false}
-*   Link, link and trailing text, or `false` if not a URL.
 */
 function findUrl(_, protocol, domain, path, match) {
-	if (!previous$1(match)) return false;
 	let prefix = "";
+	if (!previous$1(match)) return false;
 	if (/^w/i.test(protocol)) {
 		domain = protocol + domain;
 		protocol = "";
 		prefix = "http://";
 	}
-	if (unicodePunctuation(domain.charCodeAt(0)) || !isCorrectDomain(domain)) return false;
+	if (!isCorrectDomain(domain)) return false;
 	const parts = splitUrl(domain + path);
+	if (!parts[0]) return false;
 	/** @type {Link} */
 	const result = {
 		type: "link",
@@ -12498,136 +12473,53 @@ function findUrl(_, protocol, domain, path, match) {
 		url: prefix + protocol + parts[0],
 		children: [{
 			type: "text",
-			value: protocol + parts[0],
-			position: void 0
-		}],
-		position: void 0
+			value: protocol + parts[0]
+		}]
 	};
 	if (parts[1]) return [result, {
 		type: "text",
-		value: parts[1],
-		position: void 0
+		value: parts[1]
 	}];
 	return result;
 }
 /**
-* Turn an email match into a link.
-*
 * @type {ReplaceFunction}
 * @param {string} _
-*   Whole match.
 * @param {string} atext
-*   Local part.
 * @param {string} label
-*   Domain.
+* @param {RegExpMatchObject} match
 * @returns {Link | false}
-*   Link, or `false` if not an email.
 */
-function findEmail(_, atext, label) {
-	if (/[\d\-_]$/.test(label)) return false;
+function findEmail(_, atext, label, match) {
+	if (!previous$1(match, true) || /[-\d_]$/.test(label)) return false;
 	return {
 		type: "link",
 		title: null,
 		url: "mailto:" + atext + "@" + label,
 		children: [{
 			type: "text",
-			value: atext + "@" + label,
-			position: void 0
-		}],
-		position: void 0
+			value: atext + "@" + label
+		}]
 	};
 }
 /**
-* Turn a `mailto:` email match into a link.
-*
-* @type {ReplaceFunction}
-* @param {string} _
-*   Whole match.
-* @param {string} atext
-*   Local part.
-* @param {string} label
-*   Domain.
-* @returns {Link | false}
-*   Link, or `false` if not an email.
-*/
-function findMailto(_, atext, label) {
-	if (/[\d\-_]$/.test(label)) return false;
-	const value = "mailto:" + atext + "@" + label;
-	return {
-		type: "link",
-		title: null,
-		url: value,
-		children: [{
-			type: "text",
-			value,
-			position: void 0
-		}],
-		position: void 0
-	};
-}
-/**
-* Turn an `xmpp:` address match into a link.
-*
-* @type {ReplaceFunction}
-* @param {string} matchValue
-*   Whole match.
-* @param {string} atext
-*   Local part.
-* @param {string} label
-*   Domain.
-* @param {string | undefined} resource
-*   Resource (`/` and more), if any.
-* @param {RegExpMatchObject} match
-*   Match object.
-* @returns {Link | false}
-*   Link, or `false` if not an address.
-*/
-function findXmpp(matchValue, atext, label, resource, match) {
-	if (/[\d\-_]$/.test(label) || resource && (!/[A-Za-z]$/.test(resource) || match.input.charAt(match.index + matchValue.length) === "@")) return false;
-	const value = "xmpp:" + atext + "@" + label + (resource || "");
-	return {
-		type: "link",
-		title: null,
-		url: value,
-		children: [{
-			type: "text",
-			value,
-			position: void 0
-		}],
-		position: void 0
-	};
-}
-/**
-* Check if a domain is valid.
-*
 * @param {string} domain
-*   Host name to check.
 * @returns {boolean}
-*   Whether the domain is valid.
 */
 function isCorrectDomain(domain) {
 	const parts = domain.split(".");
-	if (parts.length < 2 || parts[parts.length - 1] && (/_/.test(parts[parts.length - 1]) || !/[\dA-Za-z]/.test(parts[parts.length - 1])) || parts[parts.length - 2] && (/_/.test(parts[parts.length - 2]) || !/[\dA-Za-z]/.test(parts[parts.length - 2]))) return false;
+	if (parts.length < 2 || parts[parts.length - 1] && (/_/.test(parts[parts.length - 1]) || !/[a-zA-Z\d]/.test(parts[parts.length - 1])) || parts[parts.length - 2] && (/_/.test(parts[parts.length - 2]) || !/[a-zA-Z\d]/.test(parts[parts.length - 2]))) return false;
 	return true;
 }
 /**
-* Split trailing punctuation off a URL.
-*
 * @param {string} url
-*   Value to split.
 * @returns {[string, string | undefined]}
-*   URL and trailing punctuation, if any.
 */
 function splitUrl(url) {
-	let index = url.length;
-	while (index > 0) {
-		const code = url.charCodeAt(index - 1);
-		if (code === 33 || code === 34 || code === 38 || code === 39 || code === 41 || code === 44 || code === 46 || code === 58 || code === 59 || code === 60 || code === 62 || code === 63 || code === 93 || code === 125) index--;
-		else break;
-	}
-	if (index === url.length) return [url, void 0];
-	let trail = url.slice(index);
-	url = url.slice(0, index);
+	const trailExec = /[!"&'),.:;<>?\]}]+$/.exec(url);
+	if (!trailExec) return [url, void 0];
+	url = url.slice(0, trailExec.index);
+	let trail = trailExec[0];
 	let closingParenIndex = trail.indexOf(")");
 	const openingParens = ccount(url, "(");
 	let closingParens = ccount(url, ")");
@@ -12640,16 +12532,13 @@ function splitUrl(url) {
 	return [url, trail];
 }
 /**
-* Check if the character before a match is allowed.
-*
 * @param {RegExpMatchObject} match
-*   Match object.
+* @param {boolean | null | undefined} [email=false]
 * @returns {boolean}
-*   Whether the previous character is allowed.
 */
-function previous$1(match) {
+function previous$1(match, email) {
 	const code = match.input.charCodeAt(match.index - 1);
-	return match.index === 0 || unicodeWhitespace(code) || unicodePunctuation(code);
+	return (match.index === 0 || unicodeWhitespace(code) || unicodePunctuation(code)) && (!email || code !== 47);
 }
 /**
 * @import {
@@ -12864,20 +12753,21 @@ function peekDelete() {
 	return "~";
 }
 /**
-* @import {Heading, InlineCode, Table, TableCell, TableRow} from 'mdast'
-* @import {Options as MarkdownTableOptions} from 'markdown-table'
-* @import {
-*   CompileContext,
-*   Extension as FromMarkdownExtension,
-*   Handle as FromMarkdownHandle,
-* } from 'mdast-util-from-markdown'
-* @import {
-*   Options as ToMarkdownExtension,
-*   Handle as ToMarkdownHandle,
-*   Info,
-*   Join,
-*   State
-* } from 'mdast-util-to-markdown'
+* @typedef {import('mdast').InlineCode} InlineCode
+* @typedef {import('mdast').Table} Table
+* @typedef {import('mdast').TableCell} TableCell
+* @typedef {import('mdast').TableRow} TableRow
+*
+* @typedef {import('markdown-table').Options} MarkdownTableOptions
+*
+* @typedef {import('mdast-util-from-markdown').CompileContext} CompileContext
+* @typedef {import('mdast-util-from-markdown').Extension} FromMarkdownExtension
+* @typedef {import('mdast-util-from-markdown').Handle} FromMarkdownHandle
+*
+* @typedef {import('mdast-util-to-markdown').Options} ToMarkdownExtension
+* @typedef {import('mdast-util-to-markdown').Handle} ToMarkdownHandle
+* @typedef {import('mdast-util-to-markdown').State} State
+* @typedef {import('mdast-util-to-markdown').Info} Info
 */
 /**
 * @typedef Options
@@ -12916,8 +12806,6 @@ function gfmTableFromMarkdown() {
 	};
 }
 /**
-* Enter a table.
-*
 * @this {CompileContext}
 * @type {FromMarkdownHandle}
 */
@@ -12928,14 +12816,11 @@ function enterTable(token) {
 		align: align.map(function(d) {
 			return d === "none" ? null : d;
 		}),
-		children: [],
-		position: void 0
+		children: []
 	}, token);
 	this.data.inTable = true;
 }
 /**
-* Exit a table.
-*
 * @this {CompileContext}
 * @type {FromMarkdownHandle}
 */
@@ -12944,21 +12829,16 @@ function exitTable(token) {
 	this.data.inTable = void 0;
 }
 /**
-* Enter a row.
-*
 * @this {CompileContext}
 * @type {FromMarkdownHandle}
 */
 function enterRow(token) {
 	this.enter({
 		type: "tableRow",
-		children: [],
-		position: void 0
+		children: []
 	}, token);
 }
 /**
-* Exit a row or cell.
-*
 * @this {CompileContext}
 * @type {FromMarkdownHandle}
 */
@@ -12966,24 +12846,16 @@ function exit(token) {
 	this.exit(token);
 }
 /**
-* Enter a cell.
-*
 * @this {CompileContext}
 * @type {FromMarkdownHandle}
 */
 function enterCell(token) {
 	this.enter({
 		type: "tableCell",
-		children: [],
-		position: void 0
+		children: []
 	}, token);
 }
 /**
-* Exit code (text).
-*
-* Overwrites the default code text data handler to unescape escaped pipes
-* when they are in tables.
-*
 * @this {CompileContext}
 * @type {FromMarkdownHandle}
 */
@@ -12996,30 +12868,21 @@ function exitCodeText(token) {
 	this.exit(token);
 }
 /**
-* Unescape an escaped pipe.
-*
 * @param {string} $0
-*   Whole match.
 * @param {string} $1
-*   Escaped character.
 * @returns {string}
-*   Replacement.
 */
 function replace($0, $1) {
 	return $1 === "|" ? $1 : $0;
 }
 /**
-* @import {ListItem, Paragraph, Parents} from 'mdast'
-* @import {
-*   CompileContext,
-*   Extension as FromMarkdownExtension,
-*   Handle as FromMarkdownHandle
-* } from 'mdast-util-from-markdown'
-* @import {
-*   Handle as ToMarkdownHandle,
-*   Join as ToMarkdownJoin,
-*   Options as ToMarkdownExtension
-* } from 'mdast-util-to-markdown'
+* @typedef {import('mdast').ListItem} ListItem
+* @typedef {import('mdast').Paragraph} Paragraph
+* @typedef {import('mdast-util-from-markdown').CompileContext} CompileContext
+* @typedef {import('mdast-util-from-markdown').Extension} FromMarkdownExtension
+* @typedef {import('mdast-util-from-markdown').Handle} FromMarkdownHandle
+* @typedef {import('mdast-util-to-markdown').Options} ToMarkdownExtension
+* @typedef {import('mdast-util-to-markdown').Handle} ToMarkdownHandle
 */
 /**
 * Create an extension for `mdast-util-from-markdown` to enable GFM task
@@ -13036,8 +12899,6 @@ function gfmTaskListItemFromMarkdown() {
 	} };
 }
 /**
-* Exit a check.
-*
 * @this {CompileContext}
 * @type {FromMarkdownHandle}
 */
@@ -13047,8 +12908,6 @@ function exitCheck(token) {
 	node.checked = token.type === "taskListCheckValueChecked";
 }
 /**
-* Exit a paragraph, removing the whitespace after a check.
-*
 * @this {CompileContext}
 * @type {FromMarkdownHandle}
 */
@@ -13062,21 +12921,21 @@ function exitParagraphWithTaskListItem(token) {
 			const siblings = parent.children;
 			let index = -1;
 			/** @type {Paragraph | undefined} */
-			let firstParagraph;
+			let firstParaghraph;
 			while (++index < siblings.length) {
 				const sibling = siblings[index];
 				if (sibling.type === "paragraph") {
-					firstParagraph = sibling;
+					firstParaghraph = sibling;
 					break;
 				}
 			}
-			if (firstParagraph === node) {
+			if (firstParaghraph === node) {
 				head.value = head.value.slice(1);
 				if (head.value.length === 0) node.children.shift();
 				else if (node.position && head.position && typeof head.position.start.offset === "number") {
 					head.position.start.column++;
 					head.position.start.offset++;
-					node.position.start = { ...head.position.start };
+					node.position.start = Object.assign({}, head.position.start);
 				}
 			}
 		}
@@ -17093,7 +16952,9 @@ const STATUS_KEY = {
 	escalated: "taskEscalated",
 	returned: "taskReturned",
 	done: "taskDone",
-	rework: "taskRework"
+	rework: "taskRework",
+	cancelled: "taskCancelled",
+	superseded: "taskSuperseded"
 };
 /** Single source for tab membership and board ordering; an empty list means all statuses. */
 const BOARD_TABS = [
@@ -17125,7 +16986,11 @@ const BOARD_TABS = [
 	{
 		id: "done",
 		label: "taskTabDone",
-		statuses: ["done"]
+		statuses: [
+			"done",
+			"cancelled",
+			"superseded"
+		]
 	}
 ];
 const groupOf = (status) => BOARD_TABS.findIndex((g) => g.statuses.includes(status));
@@ -17135,7 +17000,11 @@ function boardOrder(tasks) {
 }
 /** Seconds a task has taken: until hand-back, until it closed, or until now. */
 function elapsed(task, now) {
-	const end = task.returned_at ?? (task.status === "done" ? task.updated_at : now);
+	const end = task.returned_at ?? ([
+		"done",
+		"cancelled",
+		"superseded"
+	].includes(task.status) ? task.updated_at : now);
 	return Math.max(0, end - task.created_at);
 }
 /** Elapsed time as words (unit conversions only). */
@@ -17246,7 +17115,7 @@ function Status({ status, t }) {
 * Right-column board for the selected chat channel.
 * @param onOpen - jump to a message in a room (dispatch or delivery).
 */
-function TaskBoard({ tasks, rooms, chatId, roomId, t, onOpen, onReview }) {
+function TaskBoard({ tasks, rooms, chatId, roomId, t, onOpen, onReview, onRelocate }) {
 	const [opened, setOpened] = (0, react.useState)(false);
 	const [selectedTab, setSelectedTab] = (0, react.useState)(BOARD_TABS.find((tab) => tab.initial).id);
 	const [reviewing, setReviewing] = (0, react.useState)();
@@ -17345,6 +17214,21 @@ function TaskBoard({ tasks, rooms, chatId, roomId, t, onOpen, onReview }) {
 							jump(task.room_id, task.result_msg_id);
 						},
 						children: t("taskOpenResult")
+					}),
+					onRelocate !== void 0 && task.paused_at != null && task.paused_chat === chatId && rooms.some((room) => room.id === task.room_id && room.parent_id !== chatId) && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						type: "button",
+						className: ChannelsPage_module_default.linkButton,
+						disabled: saving,
+						onClick: () => {
+							setSaving(true);
+							setError(void 0);
+							onRelocate(task.id).catch((error) => {
+								setError(error instanceof Error ? error.message : String(error));
+							}).finally(() => {
+								setSaving(false);
+							});
+						},
+						children: t("taskRelocate")
 					}),
 					onReview !== void 0 && [
 						"returned",
@@ -19448,7 +19332,7 @@ function MemberGroup({ title, members, busy, onPick, onEdit, onRemove, onToggleD
 * @param props - framework, injected, and locale shares.
 * @returns the three-column channel view.
 */
-function ChannelsPage({ useChannels, selectRoom, send, reviewTask, answerAsk, createRoom, renameRoom, listModels, listClis, listPersonas, addMember, updateMember, removeMember, setNoDispatch, setLead, setWorkspacePath, renewRoom, setDispatchMode, setMaxRelay, decidePermission, retryMessage, editMessage, withdrawMessage, openModelSettings, t }) {
+function ChannelsPage({ useChannels, selectRoom, send, reviewTask, relocateTask, answerAsk, createRoom, renameRoom, listModels, listClis, listPersonas, addMember, updateMember, removeMember, setNoDispatch, setLead, setWorkspacePath, renewRoom, setDispatchMode, setMaxRelay, decidePermission, retryMessage, editMessage, withdrawMessage, openModelSettings, t }) {
 	const state = useChannels((snapshot) => snapshot);
 	const [editing, setEditing] = (0, react.useState)(void 0);
 	const [ownNotice, setOwnNotice] = (0, react.useState)(void 0);
@@ -20266,7 +20150,8 @@ function ChannelsPage({ useChannels, selectRoom, send, reviewTask, answerAsk, cr
 						roomId: state.roomId,
 						t,
 						onOpen: openMessage,
-						onReview: reviewTask
+						onReview: reviewTask,
+						onRelocate: relocateTask
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
 						type: "button",
@@ -20445,6 +20330,8 @@ const zh = {
 	taskReturned: "交回",
 	taskDone: "完成",
 	taskRework: "返工",
+	taskCancelled: "已取消",
+	taskSuperseded: "已替代",
 	taskIn: "在 #{room}",
 	taskElapsed: "用时 {d}",
 	taskNextCheck: "下次看 {time}",
@@ -20452,6 +20339,7 @@ const zh = {
 	taskOpenResult: "交回消息",
 	taskApprove: "验收通过",
 	taskSendBack: "要求返工",
+	taskRelocate: "迁入空工位继续",
 	taskReviewReason: "返工原因（必填）",
 	taskReviewSubmit: "提交返工",
 	dispatchMode: "派活方式",
@@ -20634,6 +20522,8 @@ const en = {
 	taskReturned: "Handed back",
 	taskDone: "Done",
 	taskRework: "Rework",
+	taskCancelled: "Cancelled",
+	taskSuperseded: "Superseded",
 	taskIn: "in #{room}",
 	taskElapsed: "took {d}",
 	taskNextCheck: "next check {time}",
@@ -20641,6 +20531,7 @@ const en = {
 	taskOpenResult: "Delivery",
 	taskApprove: "Accept result",
 	taskSendBack: "Request rework",
+	taskRelocate: "Move to free workspace",
 	taskReviewReason: "Reason for rework (required)",
 	taskReviewSubmit: "Submit rework",
 	lead: "Primary role",
@@ -20830,6 +20721,7 @@ function apply(ctx) {
 		selectRoom: channels.actions.selectRoom,
 		send: channels.actions.send,
 		reviewTask: channels.actions.reviewTask,
+		relocateTask: channels.actions.relocateTask,
 		answerAsk: channels.actions.answerAsk,
 		retrySend: channels.actions.retrySend,
 		dismissSend: channels.actions.dismissSend,

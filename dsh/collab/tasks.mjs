@@ -17,7 +17,10 @@ import { checkDispatch, HandoffRulesError } from './handoff-rules.mjs';
 export const STATUS = {
   assigned: '派出', accepted: '已接', asked: '有疑问', declined: '退回',
   escalated: '升级', returned: '交回', done: '完成', rework: '返工',
+  cancelled: '已取消', superseded: '已替代',
 };
+/** Terminal states: nothing but a new task follows them. */
+export const TERMINAL = ['done', 'cancelled', 'superseded'];
 /** First-line stance marks used by the team (本机团队模式【接/问/退/升】). */
 export const STANCES = { 接: 'accepted', 问: 'asked', 退: 'declined', 升: 'escalated' };
 const STANCE_WORDS = { accept: '接', ask: '问', decline: '退', escalate: '升' };
@@ -227,7 +230,7 @@ export class Tasks {
       owner: t.owner, owner_name: this.nameOf(t.owner), created_by: t.created_by, created_by_name: this.nameOf(t.created_by),
       status: t.status, next_check_at: t.next_check_at, assign_msg_id: t.assign_msg_id, result_msg_id: t.result_msg_id,
       note: t.note, reason: t.reason, ref: t.ref ?? null, base: t.base ?? null, created_at: t.created_at, updated_at: t.updated_at, returned_at: t.returned_at,
-      paused_at: t.paused_at ?? null,
+      paused_at: t.paused_at ?? null, paused_chat: t.paused_chat ?? null,
     };
   }
 
@@ -405,6 +408,41 @@ export class Tasks {
     this.wake(task.created_by, copy);
   }
 
+  /**
+   * End a task without a review: the dispatcher, the human, or (new rule) the task's own current
+   * owner may cancel or supersede it. A reason is always required, and an owner's own ending is
+   * recorded as such so it never reads as the dispatcher's approval.
+   */
+  terminate(id, { actor, status, reason, supersededBy }) {
+    const task = this.mustTask(id);
+    const own = actor === task.owner;
+    if (actor !== task.created_by && actor !== HUMAN && !own) {
+      throw new CollabError('forbidden', '只有当前接活人或派活人（或用户）能结束这条任务');
+    }
+    if (typeof reason !== 'string' || !reason.trim() || reason.length > MAX_TEXT) throw new CollabError('invalid', '结束任务要写原因，长度不能超过消息上限');
+    reason = reason.trim();
+    const replacement = supersededBy == null || supersededBy === '' ? null : Number(supersededBy);
+    if (replacement !== null && (status !== 'superseded' || !Number.isSafeInteger(replacement) || replacement <= 0 || replacement === task.id)) throw new CollabError('invalid', '替代任务必须是另一条任务的编号');
+    if (replacement !== null) this.mustTask(replacement);
+    if (TERMINAL.includes(task.status)) {
+      if (task.status === status && task.termination_reason === reason) return this.view(task);
+      throw new CollabError('conflict', `task ${id} is already ${STATUS[task.status]}; a different terminal request cannot overwrite it`);
+    }
+    const row = this.db.prepare(`UPDATE tasks SET status = ?, termination_reason = ?, superseded_by = ?,
+      next_check_at = NULL, remind_msg_id = NULL, paused_at = NULL, updated_at = ? WHERE id = ? AND status = ? RETURNING *`)
+      .get(status, reason, replacement, this.now(), id, task.status);
+    if (row === undefined) throw new CollabError('conflict', `task ${id} changed meanwhile`);
+    // A cancelled parent never leaves its review children running.
+    this.db.prepare(`UPDATE tasks SET status = 'cancelled', termination_reason = ?, next_check_at = NULL,
+      remind_msg_id = NULL, updated_at = ? WHERE parent_task = ? AND status IN ('assigned', 'accepted', 'asked', 'rework')`)
+      .run(`上级 #${id} ${STATUS[status]}`, this.now(), id);
+    const who = own ? `${this.nameOf(actor)} 自行结束` : `${this.nameOf(actor)} ${STATUS[status]}`;
+    const text = `#${id}「${row.title}」${who}${replacement === null ? '' : `；替代任务 #${replacement}`}：${reason}`;
+    this.record(row, status, text.slice(0, MAX_TEXT));
+    this.releaseIfDone(row.room_id);
+    return this.changed(id);
+  }
+
   /** The lead (or the human owner) closes the task or sends it back for rework. */
   review(id, { actor, verdict, note, messageId }) {
     const task = this.mustTask(id);
@@ -476,6 +514,7 @@ export class Tasks {
       const m = this.hub.members.get(actor);
       if (!actor || actor === HUMAN || m === undefined || m.kind === 'human') throw new CollabError('forbidden', 'actor must name an existing member other than the owner');
       if (action === 'review') throw new CollabError('forbidden', 'review needs a verified sender: the dispatcher over its own connection, or the owner');
+      // A task's own owner may end it from their own turn; that arrives verified, like review.
     }
     const optional = v => (v == null || v === '' ? undefined : Number(v));
     switch (action) {
@@ -484,7 +523,12 @@ export class Tasks {
         return this.assign({ roomId, title: body.title, owner: String(body.owner ?? ''), actor, parentTask: optional(body.parent_task), reviewOf: optional(body.review_of), messageId: optional(body.message_id), reason: body.reason, ref: String(body.ref ?? ''), base: body.base, force: Boolean(body.force), allowDuplicate: body.allow_duplicate === true });
       case 'stance': return this.stance(id, { actor, stance: String(body.stance ?? ''), note: body.note, messageId: optional(body.message_id) });
       case 'return': return this.handBack(id, { actor, messageId: optional(body.message_id) });
+      case 'relocate':
+        if (!verified) throw new CollabError('forbidden', 'relocation needs a verified dispatcher or owner');
+        return this.relocate(id, { actor });
       case 'review': return this.review(id, { actor, verdict: String(body.verdict ?? ''), note: body.note });
+      case 'cancel':
+      case 'supersede': return this.terminate(id, { actor, status: action === 'cancel' ? 'cancelled' : 'superseded', reason: body.reason, supersededBy: body.superseded_by });
       default: throw new CollabError('invalid', 'action must be assign, stance, return or review');
     }
   }
@@ -627,10 +671,6 @@ export class Tasks {
         && this.chatOf(reviewOf.room_id) === this.chatOf(msg.room_id) ? reviewOf : undefined;
       // Its next message after a chat-side hand-back accepts it. Workspace tasks need its explicit
       // 【验收】#id / 【返工】#id line (verdictsOf): it may be answering something else meanwhile.
-      for (const t of this.q.returnedChat.all(msg.room_id, lead.id)) {
-        if (t.id === reviewing?.id || this.db.prepare(`SELECT id FROM tasks WHERE parent_task = ? AND source = 'review' AND status IN (${PLACEHOLDERS})`).get(t.id, ...WORKING)) continue;
-        try { this.review(t.id, { actor: lead.id, verdict: 'done' }); } catch { /* changed meanwhile */ }
-      }
       const explicit = mentions(text, team);
       const called = new Set(explicit);
       const names = team.map(m => m.name);
@@ -985,6 +1025,33 @@ export class Tasks {
     const released = this.release(roomId, claim);
     this.arm();
     return released;
+  }
+
+  /** Move paused work to a free workspace of its original chat, retaining the task id and review history. */
+  relocate(id, { actor }) {
+    const task = this.mustTask(id);
+    if (actor !== task.created_by && actor !== HUMAN) throw new CollabError('forbidden', 'only the dispatcher or owner can relocate a task');
+    if (task.paused_at == null || !WORKING.includes(task.status) || !this.inWorkspace(task.room_id)) {
+      throw new CollabError('conflict', 'only paused workspace work can be relocated');
+    }
+    const chat = task.paused_chat ?? this.chatOf(task.room_id);
+    const owner = this.store.workspaceOwner(task.room_id);
+    if (owner == null || owner === chat) throw new CollabError('conflict', 'original workspace is available; resume the task there');
+    const workspace = this.store.createWorkspace(chat);
+    const name = this.nameOf(task.owner);
+    const handoff = this.store.message(task.assign_msg_id)?.text ?? task.reason ?? task.title;
+    const result = this.store.message(task.result_msg_id)?.text;
+    const { message } = this.hub.post(workspace.id, { authorKind: 'system', author: 'system', name: '交接',
+      text: `【交接】${name}：接续任务 #${id}「${task.title}」\n原交接：${handoff.slice(0, BRIEF_HANDOFF)}\n${result ? `上次结果：${result.slice(0, BRIEF_REPORT)}\n` : ''}原任务备注：${task.note ?? '无'}` });
+    this.db.prepare(`UPDATE tasks SET room_id = ?, assign_msg_id = ?, paused_at = NULL, paused_chat = NULL,
+      next_check_at = ?, renewals = 0, updated_at = ? WHERE id = ? AND paused_at IS NOT NULL`)
+      .run(workspace.id, message.id, this.now() + CHECK_AFTER_S, this.now(), id);
+    if (this.hub.teamExit?.enabled) this.db.prepare(`UPDATE team_exit_asks SET workspace_id = ? WHERE workspace_id = ? AND member_id = ?
+      AND answered = 0 AND source_id > ?`).run(workspace.id, task.room_id, task.owner, task.assign_msg_id ?? 0);
+    const moved = this.task(id);
+    const record = this.record(moved, 'relocate', `@${name} #${id}「${task.title}」已迁到${workspace.name}继续，原任务编号和验收记录不变。`);
+    this.wake(task.owner, record);
+    return this.changed(id);
   }
 
   /** Pause one task through the same queue/release path as park; other work stays busy. */

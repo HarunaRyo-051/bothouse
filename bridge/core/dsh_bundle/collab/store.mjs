@@ -25,6 +25,8 @@ const SCHEMA_VERSION = 11;
 const COLUMNS = [
   ['members', 'name_customized', 'INTEGER'],
   ['members', 'no_dispatch', 'INTEGER NOT NULL DEFAULT 0'],
+  ['tasks', 'termination_reason', 'TEXT'], // v: why a task was cancelled/superseded (terminal states)
+  ['tasks', 'superseded_by', 'INTEGER'],
   ['bindings', 'workspace_path', 'TEXT'], // Keep a CLI conversation in its original directory until /new. // NULL keeps existing names unchanged; only new UI members opt in.
 
   ['jobs', 'input_id', 'TEXT'], // v2: jobs remember the id of the input they admitted, to bind its consuming turn.
@@ -182,6 +184,8 @@ export class Store {
       const added = new Set();
       for (const [table, column, definition] of COLUMNS) {
         if (!has.has(table)) has.set(table, new Set(this.db.prepare(`PRAGMA table_info(${table})`).all().map(c => c.name)));
+        // A table created later in this transaction (tasks) is not there yet: skip it here.
+        if (has.get(table).size === 0) continue;
         if (!has.get(table).has(column)) {
           this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
           added.add(`${table}.${column}`);
@@ -222,6 +226,9 @@ export class Store {
       this.db.exec('DROP TABLE IF EXISTS collab_settings');
       if (version < SCHEMA_VERSION) this.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
     });
+    // Outside the transaction: SQLite refuses PRAGMA foreign_keys changes inside one, and the
+    // CHECK on tasks.status can only be widened by rebuilding the table.
+    this.migrateTaskStatuses();
   }
 
   /**
@@ -255,11 +262,13 @@ export class Store {
         ref TEXT,
         base TEXT,
         card_member_id TEXT,
+        termination_reason TEXT,
+        superseded_by INTEGER,
         renewals INTEGER NOT NULL DEFAULT 0)`);
     } else {
       const cols = new Set(this.db.prepare('PRAGMA table_info(tasks)').all().map(c => c.name));
       for (const [name, type] of [['parent_task', 'INTEGER'], ['next_check_at', 'REAL'], ['result_msg_id', 'INTEGER'],
-        ['assign_msg_id', 'INTEGER'], ['note', 'TEXT'], ['returned_at', 'REAL'], ['remind_msg_id', 'INTEGER'], ['reason', 'TEXT'], ['paused_at', 'REAL'], ['paused_chat', 'INTEGER'], ['source', 'TEXT'], ['ref', 'TEXT'], ['base', 'TEXT'], ['renewals', 'INTEGER NOT NULL DEFAULT 0'], ['card_member_id', 'TEXT']]) {
+        ['assign_msg_id', 'INTEGER'], ['note', 'TEXT'], ['returned_at', 'REAL'], ['remind_msg_id', 'INTEGER'], ['reason', 'TEXT'], ['paused_at', 'REAL'], ['paused_chat', 'INTEGER'], ['source', 'TEXT'], ['ref', 'TEXT'], ['base', 'TEXT'], ['renewals', 'INTEGER NOT NULL DEFAULT 0'], ['card_member_id', 'TEXT'], ['termination_reason', 'TEXT'], ['superseded_by', 'INTEGER']]) {
         if (!cols.has(name)) this.db.exec(`ALTER TABLE tasks ADD COLUMN ${name} ${type}`);
       }
       // #574 B2 upgrade: workspace tasks in work with no check time start their 10-minute watch
@@ -280,6 +289,25 @@ export class Store {
    * them yet, and it is the only place a room id is ever changed. Released databases
    * never hit this (no workspace was ever shipped on the shared sequence).
    */
+  /** SQLite CHECK constraints need a table rebuild; keep rows, self-references and ids. */
+  migrateTaskStatuses() {
+    const schema = this.db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'tasks'").get()?.sql;
+    if (!schema || schema.includes("'cancelled'")) return;
+    const next = schema.replace(/CREATE TABLE\s+"?tasks"?/i, 'CREATE TABLE tasks_terminal')
+      .replace("'done', 'rework'", "'done', 'rework', 'cancelled', 'superseded'");
+    this.db.exec('PRAGMA foreign_keys = OFF');
+    try {
+      this.transaction(() => {
+        const sequence = this.db.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'tasks'").get()?.seq;
+        this.db.exec(next);
+        this.db.exec('INSERT INTO tasks_terminal SELECT * FROM tasks; DROP TABLE tasks; ALTER TABLE tasks_terminal RENAME TO tasks');
+        if (sequence != null) this.db.prepare("UPDATE sqlite_sequence SET seq = ? WHERE name = 'tasks'").run(sequence);
+      });
+    } finally {
+      this.db.exec('PRAGMA foreign_keys = ON');
+    }
+  }
+
   migrateWorkspaceIds() {
     const old = this.db.prepare(`SELECT id FROM rooms WHERE kind = 'workspace' AND id < ? ORDER BY id`).all(WORKSPACE_ID_MIN);
     if (!old.length) return;
@@ -655,7 +683,7 @@ export class Store {
   /** Return stale, empty claims to the pool without taking bridge or paused work. */
   releaseIdleWorkspaces() {
     const idle = this.db.prepare(`SELECT id FROM rooms WHERE kind = 'workspace' AND free = 0
-      AND claim_bridge = 0 AND claim_task > 0
+      AND claim_bridge = 0 AND claim_task IS NOT NULL
       AND (claim_at IS NULL OR claim_at < unixepoch() - 1800)
       AND NOT EXISTS (SELECT 1 FROM tasks WHERE room_id = rooms.id
         AND status IN ('assigned', 'accepted', 'asked', 'rework'))`).all();

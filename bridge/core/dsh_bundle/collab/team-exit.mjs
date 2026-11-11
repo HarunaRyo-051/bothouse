@@ -206,6 +206,10 @@ export class TeamExit {
       authorKind: 'system', author: 'system', name: 'system', clientKey: `team-exit-bounce:${msg.id}`,
       text: `📬 @${msg.name} ${exitBounceText(kind, problems)}`,
     });
+    this.hub.post(room.parent_id, {
+      authorKind: 'system', author: 'system', name: 'system', clientKey: `team-exit-bounce-chat:${msg.id}`,
+      text: `📬 ${room.name} · ${msg.name} 的${kind === 'ask' ? '提问' : '交回'}格式需要纠正，已退回原工作区：${problems.join('；')}`,
+    });
     if (count > BOUNCE_WAKE_LIMIT) return;
     for (const wake of this.hub.tasks?.wakers ?? []) {
       try { if (wake(msg.author, message)) break; } catch (error) { this.hub.logger?.warn?.('collab: ask bounce wake failed: %s', error?.message ?? error); }

@@ -537,12 +537,13 @@ function refuse(req, res) {
  *   POST /collab/api/tasks/{id}/stance          { stance: 接|问|退|升, note? }  (task owner)
  *   POST /collab/api/tasks/{id}/return          { message_id }                  (task owner)
  *   POST /collab/api/tasks/{id}/review          { verdict: done|rework, note } (the dispatcher; note required for rework)
+ *   POST /collab/api/tasks/{id}/relocate        {} (the dispatcher or human; paused workspace only)
  * Returns undefined when the request is not for this route, else a Promise of the reply.
  */
 export function tasksRoute(req, res, url, { tasks, gateway, owner }) {
   const path = url.pathname.replace(/\/+$/, '');
   const board = /^\/collab\/api\/rooms\/(\d+)\/tasks$/.exec(path);
-  const one = /^\/collab\/api\/tasks\/(\d+)(?:\/(stance|return|review))?$/.exec(path);
+  const one = /^\/collab\/api\/tasks\/(\d+)(?:\/(stance|return|review|relocate|cancel|supersede))?$/.exec(path);
   if (board === null && one === null) return undefined;
   const human = owner(req);
   if (!human && !gateway.authorized(req, url)) return Promise.resolve(refuse(req, res));
@@ -615,7 +616,7 @@ function ticketWorkspace(req, res, roomId, { store, hub, gateway, later, tasks, 
     const open = tasks.q.openChat.get(chat, taskOwner, lead, ...WORKING);
     if (open !== undefined) {
       tasks.handBack(open.id, { actor: open.owner, messageId: message.id });
-      tasks.review(open.id, { actor: lead, verdict: 'done', note: `转到${workspace.name} #${task.id}` });
+      tasks.terminate(open.id, { actor: lead, status: 'superseded', reason: `转到${workspace.name}`, supersededBy: task.id });
     }
     if (!dsh?.nudge(taskOwner, message)) gateway.nudge?.(taskOwner, message);
     return { workspace, task: tasks.task(task.id) };
