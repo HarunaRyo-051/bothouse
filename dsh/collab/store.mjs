@@ -630,14 +630,24 @@ export class Store {
   members() { return this.q.members.all(); }
   member(id) { return this.q.member.get(id); }
   noDispatch(roomId, id) {
-    return Boolean(this.member(id)?.no_dispatch || (this.room(roomId) && this.q.botNoDispatch.get(this.settingsRoom(roomId), id)?.blocked));
+    const setting = this.room(roomId) && this.q.botNoDispatch.get(this.settingsRoom(roomId), id);
+    return Boolean(setting === undefined ? this.member(id)?.no_dispatch : setting.blocked);
   }
   noDispatchAnywhere(id) {
     return Boolean(this.member(id)?.no_dispatch || this.db.prepare('SELECT 1 FROM dispatch_blocks WHERE member_id = ? AND blocked = 1 LIMIT 1').get(id));
   }
   setNoDispatch(roomId, id, blocked) {
-    if (this.member(id)) return this.q.setNoDispatch.get(Number(blocked), id);
+    if (this.member(id)) this.q.setNoDispatch.get(Number(blocked), id);
     this.q.setBotNoDispatch.run(this.settingsRoom(roomId), id, Number(blocked));
+  }
+  /** Replace a channel's effective choices, including overrides for legacy member defaults. */
+  replaceNoDispatch(roomId, ids, available) {
+    const channel = this.settingsRoom(roomId);
+    const selected = new Set(ids);
+    this.transaction(() => {
+      for (const id of available) this.q.setBotNoDispatch.run(channel, id, Number(selected.has(id)));
+    });
+    return available.filter(id => this.noDispatch(channel, id));
   }
   /** Upsert a config member; config always wins for its own ids. */
   seedMember(m, now = Date.now() / 1000) {

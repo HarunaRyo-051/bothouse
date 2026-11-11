@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ChannelSettingsDialog } from '../src/client/ChannelSettingsDialog.tsx'
 import { zh } from '../src/client/locales.ts'
@@ -18,15 +18,35 @@ function props(): ComponentProps<typeof ChannelSettingsDialog> {
     members: [{ id: 'a', name: 'A', kind: 'dsh', online: true }, { id: 'b', name: 'B', kind: 'dsh', online: true }],
     effectiveLead: 'a', renameRoom: vi.fn(async () => {}), setDispatchMode: vi.fn(async () => {}), setMaxRelay: vi.fn(async () => {}),
     setLead: vi.fn(async () => {}), setWorkspacePath: vi.fn(async () => {}), renewRoom: vi.fn(async () => {}),
+    getNoDispatch: vi.fn(async () => []), replaceNoDispatch: vi.fn(async (_roomId, blocked) => blocked),
     onClose: vi.fn(), t: ((key: keyof typeof zh) => zh[key]) as ComponentProps<typeof ChannelSettingsDialog>['t'],
   }
 }
 const tab = (name: string) => fireEvent.click(screen.getByRole('tab', { name }))
+const dispatchReady = async () => { await waitFor(() => expect((screen.getByRole('button', { name: zh.settingsNoDispatch }) as HTMLButtonElement).disabled).toBe(false)) }
 const change = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } })
 const save = async () => { await act(async () => { fireEvent.click(screen.getByRole('button', { name: zh.messageSave })) }) }
 const saveDisabled = () => (screen.getByRole('button', { name: zh.messageSave }) as HTMLButtonElement).disabled
 
 describe('channel settings tabs', () => {
+  it('renders a multiselect with bots, checks saved choices and submits the whole selection', async () => {
+    const p = props()
+    p.members = [...p.members, { id: 'qq', name: 'QQ', kind: 'bot', online: true }]
+    p.getNoDispatch = vi.fn(async () => ['qq'])
+    render(<ChannelSettingsDialog {...p} />)
+    tab(zh.settingsDispatch)
+    await waitFor(() => expect(screen.getByRole('button', { name: zh.settingsNoDispatch })).not.toHaveProperty('disabled', true))
+    fireEvent.click(screen.getByRole('button', { name: zh.settingsNoDispatch }))
+    expect(screen.getByRole('group', { name: zh.settingsNoDispatch })).toBeTruthy()
+    expect((screen.getByRole('checkbox', { name: 'QQ' }) as HTMLInputElement).checked).toBe(true)
+    expect((screen.getByRole('checkbox', { name: 'A' }) as HTMLInputElement).checked).toBe(false)
+    fireEvent.click(screen.getByRole('checkbox', { name: 'A' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'QQ' }))
+    await save()
+    expect(p.replaceNoDispatch).toHaveBeenCalledExactlyOnceWith(1, ['a'])
+    expect(saveDisabled()).toBe(true)
+  })
+
   it('keeps a fixed dialog and scrolling body with shared tabs and a stationary action bar', () => {
     render(<ChannelSettingsDialog {...props()} />)
     const dialog = screen.getByRole('dialog')
@@ -60,6 +80,7 @@ describe('channel settings tabs', () => {
     p.renameRoom = pending; p.setDispatchMode = pending; p.setWorkspacePath = pending
     render(<ChannelSettingsDialog {...p} />)
     tab(target)
+    if (target === zh.settingsDispatch) await dispatchReady()
     expect(saveDisabled()).toBe(true)
     if (target === zh.settingsBasic) change(zh.channelName, 'new')
     else if (target === zh.settingsDispatch) fireEvent.click(screen.getByRole('radio', { name: zh.dispatchSolo }))
@@ -122,6 +143,7 @@ describe('channel settings tabs', () => {
     p.renameRoom = vi.fn(fail); p.setDispatchMode = vi.fn(fail); p.setWorkspacePath = vi.fn(fail)
     render(<ChannelSettingsDialog {...p} />)
     tab(target)
+    if (target === zh.settingsDispatch) await dispatchReady()
     if (target === zh.settingsBasic) change(zh.channelName, 'new')
     else if (target === zh.settingsDispatch) fireEvent.click(screen.getByRole('radio', { name: zh.dispatchSolo }))
     else change(zh.workingDirectory, '/new')
@@ -143,6 +165,7 @@ describe('channel settings tabs', () => {
     const p = props()
     render(<ChannelSettingsDialog {...p} />)
     tab(zh.settingsDispatch)
+    await dispatchReady()
     const field = screen.getByLabelText(zh.settingsRelay) as HTMLInputElement
     expect(field.value).toBe('6')
     expect(saveDisabled()).toBe(true)
@@ -162,11 +185,12 @@ describe('channel settings tabs', () => {
     expect(p.setMaxRelay).toHaveBeenLastCalledWith(1, 6)
   })
 
-  it('starts the relay field at the channel value and keeps both bounds saveable', () => {
+  it('starts the relay field at the channel value and keeps both bounds saveable', async () => {
     const p = props()
     p.room = { ...p.room, max_relay: 20 }
     render(<ChannelSettingsDialog {...p} />)
     tab(zh.settingsDispatch)
+    await dispatchReady()
     expect((screen.getByLabelText(zh.settingsRelay) as HTMLInputElement).value).toBe('20')
     expect(saveDisabled()).toBe(true)
     change(zh.settingsRelay, '6')
@@ -178,6 +202,7 @@ describe('channel settings tabs', () => {
     p.setLead = vi.fn().mockRejectedValueOnce(new Error('lead failed')).mockResolvedValue(undefined)
     render(<ChannelSettingsDialog {...p} />)
     tab(zh.settingsDispatch)
+    await dispatchReady()
     fireEvent.click(screen.getByRole('radio', { name: zh.dispatchTeam }))
     change(zh.channelLead, 'b')
     await save()

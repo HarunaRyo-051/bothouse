@@ -12,7 +12,7 @@ type Tab = 'basic' | 'dispatch' | 'workspace'
 const tabs = ['basic', 'dispatch', 'workspace'] as const
 const tabLabels = { basic: 'settingsBasic', dispatch: 'settingsDispatch', workspace: 'settingsWorkspace' } as const
 
-type Props = Pick<ChannelActions, 'renameRoom' | 'setDispatchMode' | 'setMaxRelay' | 'setLead' | 'setWorkspacePath' | 'renewRoom'> & {
+type Props = Pick<ChannelActions, 'renameRoom' | 'setDispatchMode' | 'setMaxRelay' | 'setLead' | 'setWorkspacePath' | 'renewRoom' | 'getNoDispatch' | 'replaceNoDispatch'> & {
   room: ChannelRoom
   members: readonly ChannelMember[]
   effectiveLead: string
@@ -21,7 +21,7 @@ type Props = Pick<ChannelActions, 'renameRoom' | 'setDispatchMode' | 'setMaxRela
 }
 
 /** Drafts and save outcomes live for the whole dialog, independently of the selected tab. */
-export function ChannelSettingsDialog({ room, members, effectiveLead, renameRoom, setDispatchMode, setMaxRelay, setLead, setWorkspacePath, renewRoom, t, onClose }: Props) {
+export function ChannelSettingsDialog({ room, members, effectiveLead, renameRoom, setDispatchMode, setMaxRelay, setLead, setWorkspacePath, renewRoom, getNoDispatch, replaceNoDispatch, t, onClose }: Props) {
   const [tab, setTab] = useState<Tab>('basic')
   const [name, setName] = useState(room.name)
   const [mode, setMode] = useState<DispatchMode>(room.dispatch_mode ?? 'mixed')
@@ -32,15 +32,31 @@ export function ChannelSettingsDialog({ room, members, effectiveLead, renameRoom
   const [saving, setSaving] = useState<Partial<Record<Tab, boolean>>>({})
   const [errors, setErrors] = useState<Partial<Record<Tab, string>>>({})
   const [success, setSuccess] = useState<Partial<Record<Tab, boolean>>>({})
+  const [blocked, setBlocked] = useState<string[]>(members.filter(member => member.kind !== 'human' && member.noDispatch).map(member => member.id))
+  const [savedBlocked, setSavedBlocked] = useState<string[]>(blocked)
+  const [blockedLoading, setBlockedLoading] = useState(true)
+  const [blockedOpen, setBlockedOpen] = useState(false)
   const [renewPending, setRenewPending] = useState(false)
   const [renewing, setRenewing] = useState(false)
   const dialogRef = useRef<HTMLElement>(null)
   useEffect(() => { dialogRef.current?.focus() }, [])
+  useEffect(() => {
+    let active = true
+    getNoDispatch(room.id).then(ids => {
+      if (!active) return
+      setBlocked([...ids]); setSavedBlocked([...ids])
+    }).catch(error => {
+      if (active) setErrors(previous => ({ ...previous, dispatch: error instanceof Error ? error.message : String(error) }))
+    }).finally(() => { if (active) setBlockedLoading(false) })
+    return () => { active = false }
+  }, [room.id, getNoDispatch])
+  const available = members.filter(member => member.kind !== 'human')
+  const blockedChanged = available.some(member => blocked.includes(member.id) !== savedBlocked.includes(member.id))
 
   const relayValid = /^\d+$/.test(relay) && Number(relay) >= RELAY_CAP_MIN && Number(relay) <= RELAY_CAP_MAX
   const dirty = {
     basic: room.kind !== 'workspace' && name !== saved.name,
-    dispatch: mode !== saved.mode || relay !== saved.relay || lead !== saved.lead,
+    dispatch: mode !== saved.mode || relay !== saved.relay || lead !== saved.lead || blockedChanged,
     workspace: directory !== saved.directory,
   }
   const close = (): void => {
@@ -55,7 +71,7 @@ export function ChannelSettingsDialog({ room, members, effectiveLead, renameRoom
   const save = async (target: Tab): Promise<void> => {
     if (saving[target] || !dirty[target]) return
     if (target === 'basic' && (!name || name.length > 32 || /\s/.test(name))) return
-    if (target === 'dispatch' && !relayValid) return
+    if (target === 'dispatch' && (!relayValid || blockedLoading)) return
     if (target === 'workspace' && (!directory || renewing || renewPending)) return
     setSaving(previous => ({ ...previous, [target]: true }))
     clearFeedback(target)
@@ -76,6 +92,10 @@ export function ChannelSettingsDialog({ room, members, effectiveLead, renameRoom
         if (relay !== saved.relay) {
           await setMaxRelay(room.id, Number(relay))
           setSaved(previous => ({ ...previous, relay }))
+        }
+        if (blockedChanged) {
+          const actual = await replaceNoDispatch(room.id, blocked)
+          setBlocked([...actual]); setSavedBlocked([...actual])
         }
       } else {
         await setWorkspacePath(room.id, directory)
@@ -136,6 +156,22 @@ export function ChannelSettingsDialog({ room, members, effectiveLead, renameRoom
                 {members.filter(member => member.kind !== 'human').map(member => <option key={member.id} value={member.id}>{member.name}</option>)}
               </select>
             </label>
+            <div className={css.field}>
+              <span>{t('settingsNoDispatch')}</span>
+              <div className={css.multiSelect}>
+                <button type="button" className={css.fieldInput} aria-label={t('settingsNoDispatch')} aria-expanded={blockedOpen} disabled={saving.dispatch || blockedLoading} onClick={() => { setBlockedOpen(open => !open) }}>
+                  {available.filter(member => blocked.includes(member.id)).map(member => member.name).join(', ') || t('settingsNoDispatchEmpty')}
+                </button>
+                {blockedOpen && <div className={css.multiSelectOptions} role="group" aria-label={t('settingsNoDispatch')}>
+                  {available.map(member => <label key={member.id} className={css.choice}>
+                    <input type="checkbox" checked={blocked.includes(member.id)} disabled={saving.dispatch} onChange={event => {
+                      setBlocked(current => event.target.checked ? [...current, member.id] : current.filter(id => id !== member.id))
+                      clearFeedback('dispatch')
+                    }} />{member.name}
+                  </label>)}
+                </div>}
+              </div>
+            </div>
             <label className={css.field}>{t('settingsRelay')}
               <input className={css.fieldInput} type="number" min={RELAY_CAP_MIN} max={RELAY_CAP_MAX} step={1} aria-label={t('settingsRelay')} value={relay} disabled={saving.dispatch} onChange={event => { setRelay(event.target.value); clearFeedback('dispatch') }} />
               <span>{t('settingsRelayHint')}</span>
@@ -166,7 +202,7 @@ export function ChannelSettingsDialog({ room, members, effectiveLead, renameRoom
       </div>}
       <div className={css.dialogActions}>
         <button type="button" className={css.secondaryButton} disabled={Object.values(saving).some(Boolean) || renewing} onClick={close}>{t('close')}</button>
-        <button type="submit" form="channel-settings-form" aria-busy={Boolean(saving[tab])} className={css.primaryButton} disabled={saving[tab] || !dirty[tab] || (tab === 'basic' && (!name || name.length > 32 || /\s/.test(name))) || (tab === 'dispatch' && !relayValid) || (tab === 'workspace' && (!directory || renewing || renewPending))}>{t(saving[tab] ? 'settingsSaving' : 'messageSave')}</button>
+        <button type="submit" form="channel-settings-form" aria-busy={Boolean(saving[tab])} className={css.primaryButton} disabled={saving[tab] || !dirty[tab] || (tab === 'basic' && (!name || name.length > 32 || /\s/.test(name))) || (tab === 'dispatch' && (!relayValid || blockedLoading)) || (tab === 'workspace' && (!directory || renewing || renewPending))}>{t(saving[tab] ? 'settingsSaving' : 'messageSave')}</button>
       </div>
     </section>
   </div>

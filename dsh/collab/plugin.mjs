@@ -382,6 +382,8 @@ export async function apply(ctx, rawConfig) {
         return { room };
       });
     }
+    const noDispatch = noDispatchRoute(req, res, path, { store, hub });
+    if (noDispatch !== undefined) return noDispatch;
     const dispatchSetting = /^\/collab\/api\/rooms\/(\d+)\/members\/([^/]+)\/no-dispatch$/.exec(path);
     if (dispatchSetting && req.method === 'PATCH') return withBody(req, res, body => {
       const roomId = Number(dispatchSetting[1]);
@@ -513,6 +515,29 @@ export function ownMessageRoute(req, res, path, { store, hub, gateway, dsh }) {
     }, false);
   }
   return undefined;
+}
+
+/** Owner-only channel roster: connected bots live in hub, not in the members table. */
+export function noDispatchRoute(req, res, path, { store, hub, owner }) {
+  const match = /^\/collab\/api\/rooms\/(\d+)\/no-dispatch$/.exec(path);
+  if (match === null) return undefined;
+  if (owner && !owner(req)) return Promise.resolve(refuse(req, res));
+  const roomId = Number(match[1]);
+  const roster = () => {
+    if (!store.room(roomId)) throw new CollabError('room-missing', `room ${roomId} does not exist`);
+    return hub.routableIn(roomId).map(member => member.id);
+  };
+  if (req.method === 'GET') return withBody(req, res, () => ({ blocked: roster().filter(id => store.noDispatch(roomId, id)) }), false);
+  if (req.method === 'PUT') return withBody(req, res, body => {
+    if (!Array.isArray(body?.blocked) || !body.blocked.every(id => typeof id === 'string')) throw new CollabError('invalid', 'blocked must be an array of member ids');
+    const available = roster();
+    const selected = body.blocked.filter(id => available.includes(id));
+    const blocked = store.replaceNoDispatch(roomId, selected, available);
+    for (const id of available) hub.emit({ type: 'no-dispatch', room_id: store.settingsRoom(roomId), member_id: id, blocked: blocked.includes(id) });
+    hub.emit({ type: 'members', members: hub.memberView() });
+    return { blocked };
+  });
+  return Promise.resolve(json(res, 404, { error: 'not found' }));
 }
 
 /**

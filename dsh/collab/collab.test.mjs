@@ -12,7 +12,7 @@ import { LeadState } from './lead-state.mjs';
 import { Roster } from './roster.mjs';
 import { promptText, teamModeRules, TurnProgress, workspaceHint } from './dsh-member.mjs';
 import { Tasks, CHECK_AFTER_S } from './tasks.mjs';
-import { tasksRoute, ownMessageRoute, renameRoomRoute, roomSettingsRoute } from './plugin.mjs';
+import { tasksRoute, ownMessageRoute, renameRoomRoute, roomSettingsRoute, noDispatchRoute } from './plugin.mjs';
 import { TeamExit } from './team-exit.mjs';
 import { ChannelApprovals } from './approvals.mjs';
 
@@ -68,6 +68,43 @@ test('store: client keys dedupe, pages are oldest-first, jobs are created and fi
   assert.equal(s.setDispatchMode(1, 'team'), 'team');
   assert.equal(s.dispatchMode(1), 'team');
   assert.throws(() => s.setDispatchMode(1, 'bad'), /dispatch mode/);
+});
+
+test('channel no-dispatch API: owner GET/PUT replaces channel roster including bots and ignores unknown ids', async () => {
+  const { Readable } = await import('node:stream');
+  const hub = makeHub();
+  const store = hub.store;
+  store.ensureRoom(2, 'other');
+  const ws = store.createWorkspace(1);
+  store.seedMember({ id: 'ds', name: 'DS', rooms: [1] });
+  hub.setMember({ id: 'ds', name: 'DS', kind: 'dsh', rooms: [1] });
+  hub.setMember({ id: 'qq', name: 'QQ', kind: 'bot', online: true });
+  store.setNoDispatch(1, 'ds', true);
+  store.setNoDispatch(1, 'qq', true);
+  const call = async (method, id, body, authorized = true) => {
+    const req = Readable.from(body === undefined ? [] : [Buffer.from(JSON.stringify(body))]);
+    req.method = method;
+    let status, result;
+    const res = { writeHead(s) { status = s; }, end(data) { result = JSON.parse(data); } };
+    await noDispatchRoute(req, res, `/collab/api/rooms/${id}/no-dispatch`, { store, hub, owner: () => authorized });
+    return { status, result };
+  };
+  assert.deepEqual(await call('GET', 1), { status: 200, result: { blocked: ['ds', 'qq'] } });
+  assert.equal((await call('GET', 1, undefined, false)).status, 401);
+  assert.equal((await call('PUT', 1, { blocked: [] }, false)).status, 401);
+  assert.deepEqual(await call('PUT', ws.id, { blocked: ['qq', 'missing', 'qq'] }), { status: 200, result: { blocked: ['qq'] } });
+  assert.deepEqual((await call('GET', 1)).result.blocked, ['qq']);
+  assert.equal(store.noDispatch(1, 'ds'), false);
+  assert.equal(store.noDispatch(2, 'ds'), true);
+  assert.equal(store.noDispatch(2, 'qq'), false);
+  assert.deepEqual((await call('PUT', 1, { blocked: ['ds'] })).result.blocked, ['ds']);
+  assert.deepEqual((await call('GET', 1)).result.blocked, ['ds']);
+  assert.equal(store.noDispatch(1, 'qq'), false);
+  assert.equal((await call('PUT', 1, { blocked: 'qq' })).status, 400);
+  assert.equal((await call('GET', 999)).status, 404);
+  const tasks = new Tasks(hub, { now: () => 1000, setTimer: () => ({}), clearTimer() {} });
+  assert.throws(() => tasks.assign({ roomId: 1, title: '禁派', owner: 'ds', actor: 'qq', force: true }), /DS 是转发机器人，不接活/);
+  tasks.close(); store.close();
 });
 
 test('channel rename API: emits fresh rooms and returns HTTP 400 for invalid names and workspaces', async () => {

@@ -233,14 +233,13 @@ function MessageRow({ message, member, t, onConfigure, menuOpen, onAvatar, onClo
   )
 }
 
-function MemberGroup({ title, members, busy, onPick, onEdit, onRemove, onToggleDispatch, t }: {
+function MemberGroup({ title, members, busy, onPick, onEdit, onRemove, t }: {
   title: string
   members: readonly ChannelMember[]
   busy: ReadonlySet<string>
   onPick: (member: ChannelMember) => void
   onEdit: (member: ChannelMember) => void
   onRemove: (member: ChannelMember) => void
-  onToggleDispatch: (member: ChannelMember) => void
   t: T
 }) {
   if (members.length === 0) return null
@@ -267,10 +266,6 @@ function MemberGroup({ title, members, busy, onPick, onEdit, onRemove, onToggleD
               )}
             </span>
           </button>
-          {m.kind !== 'human' && <label className={css.memberActions} title={t('memberNoDispatch')}>
-            <input type="checkbox" aria-label={`${m.name} ${t('memberNoDispatch')}`} checked={m.noDispatch === true} onChange={() => onToggleDispatch(m)} />
-            {t('memberNoDispatch')}
-          </label>}
           {m.kind === 'dsh' && (m.editable === true
             ? (
                 <span className={css.memberActions}>
@@ -290,7 +285,7 @@ function MemberGroup({ title, members, busy, onPick, onEdit, onRemove, onToggleD
  * @param props - framework, injected, and locale shares.
  * @returns the three-column channel view.
  */
-export function ChannelsPage({ useChannels, selectRoom, send, reviewTask, relocateTask, answerAsk, createRoom, renameRoom, listModels, listClis, listPersonas, addMember, updateMember, removeMember, setNoDispatch, setLead, setWorkspacePath, renewRoom, setDispatchMode, setMaxRelay, decidePermission, retryMessage, editMessage, withdrawMessage, openModelSettings, t }: ChannelsPageProps) {
+export function ChannelsPage({ useChannels, selectRoom, send, reviewTask, relocateTask, answerAsk, createRoom, renameRoom, listModels, listClis, listPersonas, addMember, updateMember, removeMember, setNoDispatch, getNoDispatch, replaceNoDispatch, setLead, setWorkspacePath, renewRoom, setDispatchMode, setMaxRelay, decidePermission, retryMessage, editMessage, withdrawMessage, openModelSettings, t }: ChannelsPageProps) {
   const state = useChannels(snapshot => snapshot)
   // #148: the own message being edited, and the last edit/withdraw outcome to show.
   const [editing, setEditing] = useState<{ id: number; text: string } | undefined>(undefined)
@@ -830,13 +825,15 @@ export function ChannelsPage({ useChannels, selectRoom, send, reviewTask, reloca
         <button type="button" className={css.addMemberButton} onClick={() => { setDrawer(undefined); setDialog(null) }}>+ {t('addMember')}</button>
         {memberError !== undefined && <div className={css.sendError} role="alert">{memberError}</div>}
         <hr className={css.memberListDivider} />
-        <MemberGroup title={t('agents', { count: String(visibleMembers.filter(m => m.kind !== 'human').length) })} members={visibleMembers.filter(m => m.kind !== 'human')} busy={busy} onPick={pickFromList} onEdit={setDialog} onRemove={confirmRemove} onToggleDispatch={m => { if (channelId !== undefined) setNoDispatch(channelId, m.id, !m.noDispatch).catch((error: unknown) => setMemberError(error instanceof Error ? error.message : String(error))) }} t={t} />
-        <MemberGroup title={t('humans', { count: String(visibleMembers.filter(m => m.kind === 'human').length) })} members={visibleMembers.filter(m => m.kind === 'human')} busy={busy} onPick={pickFromList} onEdit={setDialog} onRemove={confirmRemove} onToggleDispatch={m => { if (channelId !== undefined) setNoDispatch(channelId, m.id, !m.noDispatch).catch((error: unknown) => setMemberError(error instanceof Error ? error.message : String(error))) }} t={t} />
+        <MemberGroup title={t('agents', { count: String(visibleMembers.filter(m => m.kind !== 'human').length) })} members={visibleMembers.filter(m => m.kind !== 'human')} busy={busy} onPick={pickFromList} onEdit={setDialog} onRemove={confirmRemove} t={t} />
+        <MemberGroup title={t('humans', { count: String(visibleMembers.filter(m => m.kind === 'human').length) })} members={visibleMembers.filter(m => m.kind === 'human')} busy={busy} onPick={pickFromList} onEdit={setDialog} onRemove={confirmRemove} t={t} />
       </aside>
       {settingsOpen && room !== undefined && <ChannelSettingsDialog
         key={room.id}
         room={room}
         members={visibleMembers}
+        getNoDispatch={getNoDispatch}
+        replaceNoDispatch={replaceNoDispatch}
         effectiveLead={room.effective_lead_id === undefined ? state.effectiveLeadId ?? state.leadId ?? '' : room.effective_lead_id ?? ''}
         renameRoom={renameRoom}
         setDispatchMode={setDispatchMode}

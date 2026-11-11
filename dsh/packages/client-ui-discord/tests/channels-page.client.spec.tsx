@@ -28,6 +28,7 @@ function props(state: ChannelSnapshot, send: ChannelsPageProps['send'] = async (
     createRoom: vi.fn(async () => {}), renameRoom: vi.fn(async () => {}), listModels: vi.fn(async () => []),
     addMember: vi.fn(async () => {}), updateMember: vi.fn(async () => {}), removeMember: vi.fn(async () => {}),
     setLead: vi.fn(async () => {}), setDispatchMode: vi.fn(async () => {}),
+    getNoDispatch: vi.fn(async () => []), replaceNoDispatch: vi.fn(async (_roomId, blocked) => blocked),
     t: (key: keyof typeof zh, values?: Record<string, unknown>) => Object.entries(values ?? {})
       .reduce((text, [name, value]) => text.replaceAll('{' + name + '}', String(value)), String(zh[key])),
   } as unknown as ChannelsPageProps
