@@ -176,6 +176,13 @@ export function exitMark(text, { lastLine = false, team = [] } = {}) {
   return m === null ? undefined : { kind: markKind(m[1]), body: m[2].trim() };
 }
 
+/** A numbered workspace 【问】 uses the same question lifecycle as [ask]. */
+export function workspaceAskMark(text, team = []) {
+  const first = withoutLeadingMentions(String(text ?? ''), team).trim();
+  const match = /^【问】\s*#(\d+)([^\n]*)([\s\S]*)$/.exec(first);
+  return match ? { kind: 'ask', body: `#${match[1]}${match[2]}${match[3]}`.trim() } : undefined;
+}
+
 export class TeamExit {
   constructor(hub) {
     this.hub = hub;
@@ -230,9 +237,10 @@ export class TeamExit {
       return message;
     }
     if (msg.author_kind !== 'role') return;
-    const mark = msg.card == null ? exitMark(msg.text, this.markOpts(msg)) : undefined;
     const room = this.workspaceOf(msg);
     if (!room) return;
+    const workspaceAsk = msg.card == null ? workspaceAskMark(msg.text, this.hub.routable?.() ?? []) : undefined;
+    const mark = msg.card == null ? workspaceAsk ?? exitMark(msg.text, this.markOpts(msg)) : undefined;
     const ask = mark?.kind === 'ask';
     let headline;
     if (mark) {
@@ -257,7 +265,7 @@ export class TeamExit {
       const tasks = this.hub.tasks;
       // #597 G35: a DSH member's [ask] keeps its task in work and watched (and its workspace, so the
       // answer reaches the same session); a bridge bot's [ask] parks it as before (#280).
-      if (tasks && !this.markOpts(msg).lastLine) {
+      if (tasks && !this.markOpts(msg).lastLine && !workspaceAsk) {
         const busy = tasks.q.allBusy.all('assigned', 'accepted', 'asked', 'rework');
         const named = headline?.task;
         const items = [...(named ? [named] : []), ...busy]
@@ -316,7 +324,7 @@ export class TeamExit {
     const room = this.workspaceOf(msg);
     if (!room || msg.author_kind !== 'role' || msg.card != null) return undefined;
     const mark = exitMark(msg.text, this.markOpts(msg));
-    if (mark?.kind === 'ask') return undefined;
+    if (mark?.kind === 'ask' || workspaceAskMark(msg.text, this.hub.routable?.() ?? [])) return undefined;
     const lines = String(msg.text).trim().split('\n');
     if (/^\s*(?:@\S+\s+)*【(接|问|退|升)】/.test(lines[0])) lines.shift();
     const body = mark?.body ?? (lines.join('\n').trim() || String(msg.text).trim());

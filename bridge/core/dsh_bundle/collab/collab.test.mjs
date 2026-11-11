@@ -2897,7 +2897,7 @@ test('G35: a DSH task parked by the watch is woken in its kept session; answerin
   const wake = woken.find(([id]) => id === 'fu');
   assert.ok(wake && wake[1] === ws.id && !/新会话/.test(wake[2]), 'woken in the workspace, its session still there');
   assert.equal(hub.store.binding('fu', ws.id).session_id, 'collab-fu');
-  hub.post(ws.id, { authorKind: 'role', author: 'fu', name: '副', text: `【问】#${t.id}\n做到第二步，卡在依赖` });
+  hub.post(ws.id, { authorKind: 'role', author: 'fu', name: '副', text: `【接】#${t.id}\n继续做到第二步` });
   await settle();
   assert.equal(tasks.task(t.id).paused_at, null, 'resumed');
   assert.equal(hub.store.workspaceOwner(ws.id), 1, 'claimed back for its chat channel');
@@ -5409,6 +5409,42 @@ test('G35: a DSH [ask] is forwarded as a question, not a hand-back, and its task
   assert.match(copies[0].text, /ask-[0-9a-f]{8}/, 'forwarded as an ask');
   assert.equal(hub.store.page(1, undefined, 50).filter(m => /交回/.test(m.text)).length, 0);
   assert.equal(woken.length, 0);
+});
+
+test('a numbered workspace 【问】 forwards its full question and keeps the task watched', async () => {
+  const { hub, tasks, ws, assign, say } = g34Setup();
+  const t = assign();
+  const due = tasks.task(t.id).next_check_at;
+  const source = say(ws.id, `【问】#${t.id} 背景：需要选择实现。\n已检查两条路径。\n要你做的：选 A 还是 B？\n我加的：无\n自验：无需\n类别：方向`);
+  await settle();
+  const ask = hub.store.db.prepare('SELECT * FROM team_exit_asks WHERE source_id = ?').get(source.id);
+  assert.ok(ask, 'the question is persisted for reply routing');
+  const copy = hub.store.message(ask.forwarded_id);
+  assert.equal(copy.room_id, 1);
+  assert.match(copy.text, /选 A 还是 B？/);
+  assert.match(copy.text, /已检查两条路径/);
+  assert.equal(tasks.task(t.id).status, 'assigned', 'the question is not a task stance');
+  assert.equal(tasks.task(t.id).next_check_at, due);
+  assert.equal(tasks.task(t.id).paused_at, null);
+  assert.equal(hub.store.workspaceOwner(ws.id), 1);
+  hub.post(1, { authorKind: 'user', author: 'owner', name: 'Owner', text: '选 A', replyTo: copy.id });
+  await settle();
+  assert.equal(hub.store.db.prepare('SELECT answered FROM team_exit_asks WHERE source_id = ?').get(source.id).answered, 1);
+  assert.ok(hub.store.page(ws.id).some(m => /用户回复 ask-/.test(m.text)));
+});
+
+test('a chat-channel 【问】 remains a stance and an empty note uses its message body', async () => {
+  const { hub, tasks, assign, say } = g34Setup();
+  const t = tasks.assign({ roomId: 1, title: '聊天提问', owner: 'fu', actor: 'zhu' });
+  say(1, `【问】#${t.id}\n正文问题：选哪个版本？`);
+  await settle();
+  assert.equal(tasks.task(t.id).status, 'asked');
+  assert.match(hub.store.page(1).find(m => m.text.includes('表态【问】')).text, /正文问题：选哪个版本？/);
+  assert.equal(hub.store.db.prepare('SELECT COUNT(*) n FROM team_exit_asks').get().n, 0);
+  const other = tasks.assign({ roomId: hub.store.createWorkspace(1).id, title: '工作区表态', owner: 'fu', actor: 'zhu', force: true });
+  const source = hub.store.append(other.room_id, { authorKind: 'role', author: 'fu', name: '副', text: `【接】#${other.id}\n第二行的完整说明` }).message;
+  tasks.perform('stance', { id: other.id, body: { stance: 'accept', note: '', message_id: source.id } }, { actor: 'fu', verified: true });
+  assert.match(hub.store.page(1).find(m => m.text.includes(`表态【接】`) && m.text.includes(`「${other.title}」`)).text, /第二行的完整说明/);
 });
 
 test('G35: while a DSH [ask] waits on the user the watch wakes nobody and keeps the workspace; the answer re-arms it', async () => {
