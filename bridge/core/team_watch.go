@@ -308,6 +308,11 @@ func (w *handoffWatch) check(d watchDue, now time.Time) time.Time {
 	if target != nil && !target.quotaCoolingFor(target.admissionQuotaScope(target.agent, key)).IsZero() {
 		return now.Add(watchRetryDelay) // quota takeover changes the owner; never nudge the cooling role
 	}
+	if w.workspaceAwaitingUser(key) {
+		due := now.Add(watchCheckAfter())
+		_, _ = w.updateHandoff(key, h, func(x *TeamHandoff) { x.Due = due; x.Nudged = false })
+		return due
+	}
 	busy := w.workspaceBusy(key)
 	if target != nil {
 		busy = target.watchBusy(key)
@@ -650,6 +655,32 @@ func interactiveSessionInWorkspace(stateKey, workspaceKey string) (string, bool)
 		}
 	}
 	return "", false
+}
+
+// workspaceAwaitingUser keeps a pending permission or AskUserQuestion out of the idle watch.
+func (w *handoffWatch) workspaceAwaitingUser(key string) bool {
+	for _, e := range w.engines() {
+		if e == nil {
+			continue
+		}
+		e.interactiveMu.Lock()
+		var states []*interactiveState
+		for k, state := range e.interactiveStates {
+			if _, ok := interactiveSessionInWorkspace(k, key); ok {
+				states = append(states, state)
+			}
+		}
+		e.interactiveMu.Unlock()
+		for _, state := range states {
+			state.mu.Lock()
+			waiting := state.pending != nil
+			state.mu.Unlock()
+			if waiting {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // workspaceEventActive: any session of workspace key received an agent event at or after since.

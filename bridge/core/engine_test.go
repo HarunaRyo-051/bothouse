@@ -6655,6 +6655,37 @@ func TestSendAskQuestionPrompt_CardPlatform_MultiQuestion_ShowsIndex(t *testing.
 	}
 }
 
+type stubBridgeAskQuestionPlatform struct {
+	stubCardPlatform
+	buttonRows [][]ButtonOption
+}
+
+func (p *stubBridgeAskQuestionPlatform) PreferAskQuestionButtons() bool { return true }
+func (p *stubBridgeAskQuestionPlatform) SendWithButtons(_ context.Context, _ any, _ string, buttons [][]ButtonOption) error {
+	p.buttonRows = buttons
+	return nil
+}
+
+func TestSendAskQuestionPrompt_BridgePrefersButtonsOverFallbackCard(t *testing.T) {
+	e := newTestEngine()
+	p := &stubBridgeAskQuestionPlatform{stubCardPlatform: stubCardPlatform{stubPlatformEngine: stubPlatformEngine{n: "cloud_web"}}}
+	e.sendAskQuestionPrompt(p, "ctx", testQuestions(), 0)
+	if len(p.sentCards) != 0 || len(p.buttonRows) != 3 || p.buttonRows[0][0].Data != "askq:0:1" {
+		t.Fatalf("expected actionable askq buttons, cards=%d buttons=%v", len(p.sentCards), p.buttonRows)
+	}
+}
+
+func TestSendAskQuestionPrompt_BridgeMultiSelectHasNoEarlyDecisionButtons(t *testing.T) {
+	e := newTestEngine()
+	p := &stubBridgeAskQuestionPlatform{stubCardPlatform: stubCardPlatform{stubPlatformEngine: stubPlatformEngine{n: "cloud_web"}}}
+	qs := testMultiQuestions()
+	qs[0].MultiSelect = true
+	e.sendAskQuestionPrompt(p, "ctx", qs, 0)
+	if len(p.sentCards) != 0 || len(p.buttonRows) != 0 {
+		t.Fatalf("multi-select must wait for a text answer, cards=%d buttons=%v", len(p.sentCards), p.buttonRows)
+	}
+}
+
 func TestSendAskQuestionPrompt_InlineButtonPlatform(t *testing.T) {
 	e := newTestEngine()
 	p := &stubInlineButtonPlatform{stubPlatformEngine: stubPlatformEngine{n: "telegram"}}

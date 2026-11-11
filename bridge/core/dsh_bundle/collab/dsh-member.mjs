@@ -846,33 +846,30 @@ export class DshMembers {
     // "成员出错 / 去配置模型" also cooled the provider quota for what was a process restart.
     if (state === 'interrupted') {
       this.hub.setError(job.member_id, undefined);
-      this.hub.post(job.room_id, {
-        authorKind: 'system', author: 'system', name: 'system', text: String(notice), clientKey: `dsh-job-${jobId}-${state}-${Date.now()}`,
-        card: JSON.stringify({
-          title: '被中断',
-          state: 'failed',
-          action: 'retry',
-          job_id: jobId,
-          member_id: job.member_id,
-          trigger_id: job.trigger_id,
-        }),
-      });
+      this.postFailure(job, String(notice), `dsh-job-${jobId}-${state}-${Date.now()}`, {
+          title: '被中断', state: 'failed', action: 'retry', job_id: jobId,
+          member_id: job.member_id, trigger_id: job.trigger_id,
+        });
       return;
     }
     this.hub.quota?.observe(job.member_id, job.room_id, { error: String(notice) });
     const error = friendlyFailure(notice);
     this.hub.setError(job.member_id, error);
-    this.hub.post(job.room_id, {
-      authorKind: 'system', author: 'system', name: 'system', text: error, clientKey: `dsh-job-${jobId}-${state}-${Date.now()}`,
-      card: JSON.stringify({
-        title: '成员出错',
-        state: 'failed',
-        action: 'configure-model',
-        job_id: jobId,
-        member_id: job.member_id,
-        trigger_id: job.trigger_id,
-      }),
+    this.postFailure(job, error, `dsh-job-${jobId}-${state}-${Date.now()}`, {
+      title: '成员出错', state: 'failed', action: 'configure-model', job_id: jobId,
+      member_id: job.member_id, trigger_id: job.trigger_id,
     });
+  }
+
+  postFailure(job, text, clientKey, card) {
+    const message = { authorKind: 'system', author: 'system', name: 'system', text,
+      clientKey, card: JSON.stringify(card) };
+    this.hub.post(job.room_id, message);
+    const room = this.store.room(job.room_id);
+    if (room?.parent_id && room.parent_id !== room.id) {
+      this.hub.post(room.parent_id, { ...message, clientKey: `failure-copy:${job.id}`,
+        card: JSON.stringify({ ...card, source_room_id: room.id }) });
+    }
   }
 
   /**

@@ -682,6 +682,9 @@ func (p *Platform) Send(ctx context.Context, replyCtx any, content string) error
 	return p.Reply(ctx, replyCtx, content)
 }
 
+// PreferAskQuestionButtons keeps AskUserQuestion options in the gateway's actionable button frame.
+func (p *Platform) PreferAskQuestionButtons() bool { return true }
+
 func (p *Platform) SendWithButtons(ctx context.Context, replyCtx any, content string, buttons [][]core.ButtonOption) error {
 	rc, err := parseReplyCtx(replyCtx)
 	if err != nil {

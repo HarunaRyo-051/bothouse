@@ -14,19 +14,19 @@ type T = TranslateNS<typeof NS>
 
 /** Permission card metadata as stored in `ChannelMessage.card`. */
 export interface PermissionCardData {
-  readonly kind: 'permission'
-  readonly state: 'pending' | 'allowed' | 'denied' | 'allowed_all' | 'expired'
-  readonly actions: readonly { readonly decision: PermissionDecision; readonly label: string }[]
+  readonly kind: 'permission' | 'question'
+  readonly state: 'pending' | 'answered' | 'allowed' | 'denied' | 'allowed_all' | 'expired'
+  readonly actions: readonly { readonly decision: PermissionDecision | `askq:${number}:${number}`; readonly label: string }[]
   readonly decided_by?: 'button' | 'text'
 }
 
-const STATE_TEXT = { allowed: 'permAllowed', denied: 'permDenied', allowed_all: 'permAllowedAll', expired: 'permExpired' } as const
+const STATE_TEXT = { answered: 'questionAnswered', allowed: 'permAllowed', denied: 'permDenied', allowed_all: 'permAllowedAll', expired: 'permExpired' } as const
 
 export function PermissionCard({ messageId, card, t, onDecide }: {
   messageId: number
   card: PermissionCardData
   t: T
-  onDecide: (messageId: number, decision: PermissionDecision) => Promise<void>
+  onDecide: (messageId: number, decision: PermissionDecision | `askq:${number}:${number}`) => Promise<void>
 }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | undefined>(undefined)
@@ -38,7 +38,7 @@ export function PermissionCard({ messageId, card, t, onDecide }: {
       </div>
     )
   }
-  const decide = (decision: PermissionDecision): void => {
+  const decide = (decision: PermissionDecision | `askq:${number}:${number}`): void => {
     if (busy) return
     setBusy(true)
     setError(undefined)

@@ -317,6 +317,7 @@ export async function apply(ctx, rawConfig) {
         if (message.card) {
           try { card = JSON.parse(message.card); } catch {}
         }
+        if (card?.state === 'retried') throw new CollabError('conflict', '这个失败请求已经处理过了');
         let memberId = card?.member_id;
         let triggerId = card?.trigger_id;
         if (!memberId && typeof message.client_key === 'string') {
@@ -358,7 +359,14 @@ export async function apply(ctx, rawConfig) {
         // member's reply or as a new error card with its own retry button. A transient
         // 'retrying' state here was never cleared, so the card stayed "retrying" forever.
         if (card && (card.state === 'failed' || card.action === 'configure-model')) {
-          hub.edit(message.id, message.author_kind, message.author, message.text, JSON.stringify({ ...card, state: 'retried' }));
+          const cards = store.db.prepare('SELECT * FROM messages WHERE card IS NOT NULL AND deleted = 0').all();
+          for (const row of cards) {
+            let peer;
+            try { peer = JSON.parse(row.card); } catch { continue; }
+            if (peer?.job_id === card.job_id && peer.state === 'failed') {
+              hub.edit(row.id, row.author_kind, row.author, row.text, JSON.stringify({ ...peer, state: 'retried' }));
+            }
+          }
         }
         return { ok: true, member_id: memberId, trigger_id: triggerId };
       }, false);

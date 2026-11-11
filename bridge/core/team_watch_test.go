@@ -733,6 +733,34 @@ func TestWatchBusySessionWithoutEventsStaysCapped(t *testing.T) {
 	}
 }
 
+func TestWatchPendingPermissionWaitsForUserWithoutParking(t *testing.T) {
+	e, p, w, h := progressFixture(t, "")
+	s := e.sessions.GetOrCreateActive("discord:ws1:u1")
+	if !s.TryLock() {
+		t.Fatal("lock")
+	}
+	state := &interactiveState{pending: &pendingPermission{RequestID: "request", Resolved: make(chan struct{})}}
+	e.interactiveStates["discord:ws1:u1"] = state
+	now := h.Due
+	for i := 0; i < watchBusyMaxRenew+3; i++ {
+		now = w.tick(now)
+		got := handoffsOf(e, "discord:ws1")[0]
+		if now.IsZero() || !got.Parked.IsZero() || got.Renewed != 0 || got.BusyRenewed != 0 || got.Nudged {
+			t.Fatalf("pending request must wait without a watch renewal: %+v", got)
+		}
+	}
+	state.mu.Lock()
+	state.pending = nil
+	state.mu.Unlock()
+	s.Unlock()
+	if next := watchAfterWarning(t, w, now); !next.IsZero() {
+		t.Fatalf("after answering, idle workspace should park, next %v", next)
+	}
+	if got := handoffsOf(e, "discord:ws1")[0]; got.Parked.IsZero() || len(p.sentTo("discord:ws1")) != 1 {
+		t.Fatalf("watch did not resume after answer: %+v", got)
+	}
+}
+
 // In multi-workspace mode interactiveStates is keyed "<workspace path>:<session key>" (see
 // interactiveKeyForSessionKey); the watch must see that state as a session of the workspace,
 // not compare chatOf() of the prefixed key with the workspace key.

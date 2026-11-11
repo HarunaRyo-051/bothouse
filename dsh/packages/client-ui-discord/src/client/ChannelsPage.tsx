@@ -219,14 +219,14 @@ function MessageRow({ message, member, t, onConfigure, menuOpen, onAvatar, onClo
                     )}
                   </div>
                 )}
-                {card.kind === 'permission' && <PermissionCard messageId={message.id} card={card as PermissionCardData} t={t} onDecide={onDecide} />}
+                {(card.kind === 'permission' || card.kind === 'question') && <PermissionCard messageId={message.id} card={card as PermissionCardData} t={t} onDecide={onDecide} />}
                 {card.kind === 'task' && typeof card.task_id === 'number' && <TaskCard taskId={card.task_id} tasks={tasks} t={t} />}
               </div>
             )}
         {taskCards.map(task => <div key={task.id} className={css.card} data-anchored-task={task.id}><TaskCard taskId={task.id} tasks={tasks} t={t} /></div>)}
       </div>
       {/* System notices and progress cards are not conversation turns, so they take no reply. */}
-      {message.author_kind !== 'system' && card === undefined && (
+      {message.author_kind !== 'system' && (card === undefined || card.kind === 'question' && card.state === 'pending') && (
         <button type="button" className={css.replyButton} title={t('reply')} aria-label={t('reply')} onClick={() => { onReply(message) }}>↩</button>
       )}
     </div>

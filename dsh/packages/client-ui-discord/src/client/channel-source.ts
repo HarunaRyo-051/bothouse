@@ -330,7 +330,7 @@ export interface ChannelActions {
   setWorkspacePath(roomId: number, path: string): Promise<void>
   renewRoom(roomId: number): Promise<void>
   /** Answer a bot's permission prompt (#120); rejects with the service's reason (already decided, expired, offline). */
-  decidePermission(messageId: number, decision: PermissionDecision): Promise<void>
+  decidePermission(messageId: number, decision: PermissionDecision | `askq:${number}:${number}`): Promise<void>
   /** Page further back in the selected room; resolves with how many rows arrived. */
   loadOlder(): Promise<number>
   /** Retry a failed message or system error card (#146). */

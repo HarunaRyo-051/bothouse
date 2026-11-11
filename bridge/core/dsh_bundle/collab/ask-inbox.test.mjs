@@ -75,6 +75,7 @@ test('ask inbox lists only this channel, delivers answers, rearms watch and dedu
     assert.equal(pending.failed[0].job_id, job.id);
     assert.deepEqual((await request('GET', '/collab/api/rooms/2/pending')).approval, []);
     approvals.decide(permission.messageId, 'deny');
+    assert.equal(rearmed, 1, 'authorization resumes the watch once');
     assert.deepEqual((await request('GET', '/collab/api/rooms/1/pending')).approval, []);
     const list = await request('GET', '/collab/api/rooms/1/asks');
     assert.equal(list.asks.length, 1);
@@ -87,11 +88,11 @@ test('ask inbox lists only this channel, delivers answers, rearms watch and dedu
     assert.deepEqual(answered.asks, []);
     await tick();
     assert.equal(store.db.prepare('SELECT answered FROM team_exit_asks WHERE id = ?').get(ask.id).answered, 1);
-    assert.equal(rearmed, 1);
+    assert.equal(rearmed, 2);
     assert.equal(store.page(ws.id).filter(m => m.author_kind === 'user' && m.text.includes('选蓝色')).length, 1);
     assert.deepEqual((await request('POST', `/collab/api/asks/${ask.id}/answer`, { text: '选蓝色' })).asks, []);
     await tick();
-    assert.equal(rearmed, 1);
+    assert.equal(rearmed, 2);
     assert.equal(store.page(ws.id).filter(m => m.author_kind === 'user' && m.text.includes('选蓝色')).length, 1);
     assert.deepEqual((await request('GET', '/collab/api/rooms/1/asks')).asks, []);
   } finally { store.close(); }

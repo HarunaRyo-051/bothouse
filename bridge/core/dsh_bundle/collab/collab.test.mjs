@@ -14,6 +14,7 @@ import { promptText, teamModeRules, TurnProgress, workspaceHint } from './dsh-me
 import { Tasks, CHECK_AFTER_S } from './tasks.mjs';
 import { tasksRoute, ownMessageRoute, renameRoomRoute, roomSettingsRoute } from './plugin.mjs';
 import { TeamExit } from './team-exit.mjs';
+import { ChannelApprovals } from './approvals.mjs';
 
 const quiet = { warn() {}, info() {} };
 const tick = () => new Promise(r => setImmediate(r));
@@ -1533,6 +1534,22 @@ test('member failure publishes actionable error and clears it on retry', () => {
   assert.equal(hub.memberView().find(m => m.id === 'ds').error, undefined);
 });
 
+test('workspace failure has a channel action with its own message id and original trigger', () => {
+  const hub = makeHub();
+  const members = fakeDsh().attach(hub, [{ id: 'ds', name: 'DeepSeek' }]);
+  const ws = hub.store.createWorkspace(1);
+  const trigger = hub.store.append(ws.id, { authorKind: 'user', author: 'owner', name: '我', text: 'build' }).message;
+  const job = hub.store.addJob('ds', ws.id, trigger.id);
+  members.fail(job.id, 'model not found');
+  const source = hub.store.page(ws.id).find(m => JSON.parse(m.card ?? 'null')?.job_id === job.id);
+  const copy = hub.store.page(1).find(m => JSON.parse(m.card ?? 'null')?.job_id === job.id);
+  assert.ok(source && copy);
+  assert.notEqual(copy.id, source.id);
+  assert.equal(JSON.parse(copy.card).trigger_id, trigger.id);
+  assert.equal(JSON.parse(copy.card).source_room_id, ws.id);
+  assert.match(copy.text, /模型暂时不可用/);
+});
+
 test('an unreachable provider names the setting to check instead of echoing the transport error', () => {
   assert.match(friendlyFailure('DeepSeek 这一轮没有给出回复（error：Connection error.）'), /连不上模型服务/);
   assert.match(friendlyFailure('fetch failed'), /连不上模型服务/);
@@ -2055,6 +2072,46 @@ test('cloud-web #120: permission prompt → button → card_action → card stat
   const again = connect(gw, 'bot=dou&name=大豆包');
   assert.equal(again.of('register_ack')[0].ok, true);
   assert.equal(JSON.parse(hub.store.message(third.id).card).state, 'expired');
+});
+
+test('bridge AskUserQuestion appears in channel and answers once via button or reply', async () => {
+  const hub = makeHub();
+  const ws = hub.store.createWorkspace(1);
+  const gw = new CloudWebGateway(hub, { token: 't', logger: quiet });
+  const bot = connect(gw, 'bot=dou&name=大豆包');
+  const ask = (session) => bot.frame({ type: 'buttons', session_key: session, reply_ctx: `room-${ws.id}`,
+    content: 'Which implementation?', buttons: [[{ Text: 'A', Data: 'askq:0:1' }, { Text: 'B', Data: 'askq:0:2' }]] });
+  ask('question-button'); await tick();
+  const source = hub.store.page(ws.id).find(m => JSON.parse(m.card ?? 'null')?.kind === 'question');
+  const copy = hub.store.page(1).find(m => JSON.parse(m.card ?? 'null')?.request_id === source.id);
+  assert.ok(copy);
+  gw.decidePermission(copy.id, 'askq:0:2');
+  assert.equal(cardState(hub, source.id), 'answered');
+  assert.equal(cardState(hub, copy.id), 'answered');
+  assert.equal(bot.of('card_action').length, 1);
+  assert.throws(() => gw.decidePermission(source.id, 'askq:0:1'), /已经处理/);
+  ask('question-text'); await tick();
+  const next = hub.store.page(1).find(m => JSON.parse(m.card ?? 'null')?.kind === 'question' && JSON.parse(m.card).state === 'pending');
+  hub.post(1, { authorKind: 'user', author: 'owner', name: 'Owner', text: 'Custom answer', replyTo: next.id });
+  await tick();
+  assert.equal(cardState(hub, next.id), 'answered');
+  assert.equal(bot.of('message').filter(m => m.content === 'Custom answer').length, 1);
+  assert.match(bot.of('message').find(m => m.content === 'Custom answer').msg_id, /^hub-\d+$/);
+  assert.throws(() => gw.decidePermission(next.id, 'askq:0:1'), /已经处理/);
+  // A question with no choices still exposes a reply target in the channel.
+  bot.frame({ type: 'buttons', session_key: 'question-freeform', reply_ctx: `room-${ws.id}`,
+    content: '❓ **Describe the expected result**', buttons: [] });
+  await tick();
+  const freeform = hub.store.page(1).find(m => JSON.parse(m.card ?? 'null')?.kind === 'question' && /Describe/.test(m.text));
+  assert.ok(freeform);
+  const restarted = new ChannelApprovals(hub);
+  assert.throws(() => restarted.decide(copy.id, 'askq:0:2'), /已经处理/);
+  const old = hub.store.message(JSON.parse(freeform.card).request_id);
+  assert.equal(JSON.parse(old.card).state, 'pending');
+  const staleReply = hub.post(1, { authorKind: 'user', author: 'owner', name: 'Owner', text: 'After restart', replyTo: freeform.id }).message;
+  restarted.answerByText(staleReply);
+  assert.equal(JSON.parse(hub.store.message(old.id).card).state, 'expired');
+  assert.equal(cardState(hub, freeform.id), 'expired');
 });
 
 test('cloud-web #120: owner text reply takes the same decision path; bot text does not approve', async () => {
@@ -5461,6 +5518,26 @@ test('a chat-channel 【问】 remains a stance and an empty note uses its messa
   const source = hub.store.append(other.room_id, { authorKind: 'role', author: 'fu', name: '副', text: `【接】#${other.id}\n第二行的完整说明` }).message;
   tasks.perform('stance', { id: other.id, body: { stance: 'accept', note: '', message_id: source.id } }, { actor: 'fu', verified: true });
   assert.match(hub.store.page(1).find(m => m.text.includes(`表态【接】`) && m.text.includes(`「${other.title}」`)).text, /第二行的完整说明/);
+});
+
+test('workspace watch waits for authorization and resumes only after a decision', () => {
+  const { hub, tasks, clock, woken, ws, assign } = g34Setup();
+  clock.t = Math.ceil(Date.now() / 1000) + 100;
+  const base = clock.t;
+  const t = assign();
+  const approval = ChannelApprovals.of(hub).open({ room: ws.id, author: { id: 'fu', name: '副' }, text: 'write file' });
+  for (let i = 1; i <= 4; i++) {
+    clock.t = base + i * CHECK_AFTER_S;
+    tasks.tick();
+  }
+  assert.equal(tasks.task(t.id).paused_at, null);
+  assert.equal(tasks.task(t.id).renewals, 0);
+  assert.equal(woken.length, 0);
+  hub.approvals.decide(approval.messageId, 'allow');
+  assert.equal(tasks.task(t.id).next_check_at, clock.t + CHECK_AFTER_S);
+  clock.t += CHECK_AFTER_S;
+  tasks.tick();
+  assert.ok(tasks.task(t.id).paused_at, 'after the decision, inactivity is watched again');
 });
 
 test('G35: while a DSH [ask] waits on the user the watch wakes nobody and keeps the workspace; the answer re-arms it', async () => {

@@ -809,7 +809,7 @@ export class Tasks {
     // #597 G35: an owner waiting on its [ask] waits on the user, not stuck: no progress check, no
     // reminder, no pause (which would release the workspace the answer comes back to). The watch
     // only moves on, renewals untouched; the answer re-arms it (rewatch).
-    if (this.awaitingUser(task)) {
+    if (this.awaitingUser(task) || [...(this.hub.approvals?.pending?.values() ?? [])].some(p => p.room === task.room_id && p.author === task.owner)) {
       if (this.q.renew.get(now + CHECK_AFTER_S, renewals, task.id, ...WORKING) !== undefined) this.changed(task.id);
       return;
     }

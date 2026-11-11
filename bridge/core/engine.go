@@ -13828,8 +13828,10 @@ func (e *Engine) sendAskQuestionPrompt(p Platform, replyCtx any, questions []Use
 		titleSuffix = fmt.Sprintf(" (%d/%d)", qIdx+1, total)
 	}
 
+	// A platform that relays buttons to another renderer can opt out of native cards.
+	preferButtons, _ := p.(interface{ PreferAskQuestionButtons() bool })
 	// Try card (Feishu/Lark)
-	if supportsCards(p) {
+	if supportsCards(p) && (preferButtons == nil || !preferButtons.PreferAskQuestionButtons()) {
 		cb := NewCard().Title(e.i18n.T(MsgAskQuestionTitle)+titleSuffix, "blue")
 		body := "**" + q.Question + "**"
 		if q.MultiSelect {
@@ -13894,8 +13896,10 @@ func (e *Engine) sendAskQuestionPrompt(p Platform, replyCtx any, questions []Use
 			textBuf.WriteString("\n")
 		}
 		var rows [][]ButtonOption
-		for i, opt := range q.Options {
-			rows = append(rows, []ButtonOption{{Text: opt.Label, Data: fmt.Sprintf("askq:%d:%d", qIdx, i+1)}})
+		if !q.MultiSelect {
+			for i, opt := range q.Options {
+				rows = append(rows, []ButtonOption{{Text: opt.Label, Data: fmt.Sprintf("askq:%d:%d", qIdx, i+1)}})
+			}
 		}
 		if err := e.waitOutgoing(p); err != nil {
 			slog.Warn("sendAskQuestionPrompt: outgoing wait cancelled", "platform", p.Name(), "error", err)

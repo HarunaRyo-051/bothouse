@@ -34,6 +34,22 @@ function props(state: ChannelSnapshot, send: ChannelsPageProps['send'] = async (
 }
 
 describe('channels page', () => {
+  it('answers a mirrored bridge question from the channel without opening its workspace', async () => {
+    const decide = vi.fn(async () => {})
+    const send = vi.fn(async () => {})
+    const state = { ...ready, thinking: {}, messages: [{ id: 42, room_id: 1, author_kind: 'role' as const,
+      author: 'ju', name: '橘', text: 'Which option?', created_at: 1, from_turn: null,
+      card: JSON.stringify({ kind: 'question', title: '需要答复', state: 'pending', request_id: 21,
+        actions: [{ decision: 'askq:0:2', label: 'B' }] }) }] }
+    render(<ChannelsPage {...props(state, send)} decidePermission={decide} />)
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'B' })) })
+    expect(decide).toHaveBeenCalledExactlyOnceWith(42, 'askq:0:2')
+    fireEvent.click(screen.getByRole('button', { name: zh.reply }))
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'Custom answer' } })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '发送' })) })
+    expect(send).toHaveBeenCalledWith('Custom answer', 42)
+  })
+
   it('saves the channel directory before asking to renew and supports later or immediate recreation', async () => {
     const p = props({ ...ready, rooms: [{ id: 1, name: 'general', workspace_path: '/old', effective_lead_id: 'ju' }] })
     const save = vi.fn(async () => {})
