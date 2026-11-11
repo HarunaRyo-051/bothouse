@@ -5423,6 +5423,7 @@ test('a numbered workspace 【问】 forwards its full question and keeps the ta
   assert.equal(copy.room_id, 1);
   assert.match(copy.text, /选 A 还是 B？/);
   assert.match(copy.text, /已检查两条路径/);
+  assert.match(copy.text, /自验：无需\n类别：方向/, 'the reply target contains the entire question');
   assert.equal(tasks.task(t.id).status, 'assigned', 'the question is not a task stance');
   assert.equal(tasks.task(t.id).next_check_at, due);
   assert.equal(tasks.task(t.id).paused_at, null);
@@ -5431,6 +5432,21 @@ test('a numbered workspace 【问】 forwards its full question and keeps the ta
   await settle();
   assert.equal(hub.store.db.prepare('SELECT answered FROM team_exit_asks WHERE source_id = ?').get(source.id).answered, 1);
   assert.ok(hub.store.page(ws.id).some(m => /用户回复 ask-/.test(m.text)));
+});
+
+test('a numbered workspace 【升】 forwards the full decision request to the original task', async () => {
+  const { hub, tasks, ws, assign, say } = g34Setup();
+  const t = assign();
+  const source = say(ws.id, `【升】#${t.id} 背景：操作不可逆。\n已经核实影响。\n要你做的：是否批准？\n我加的：无\n自验：无需\n类别：方向`);
+  await settle();
+  const ask = hub.store.db.prepare('SELECT * FROM team_exit_asks WHERE source_id = ?').get(source.id);
+  assert.ok(ask);
+  const copy = hub.store.message(ask.forwarded_id);
+  assert.match(copy.text, /是否批准？[\s\S]*类别：方向/);
+  assert.equal(tasks.task(t.id).status, 'assigned');
+  hub.post(1, { authorKind: 'user', author: 'owner', name: 'Owner', text: '不批准', replyTo: copy.id });
+  await settle();
+  assert.equal(hub.store.db.prepare('SELECT answered FROM team_exit_asks WHERE id = ?').get(ask.id).answered, 1);
 });
 
 test('a chat-channel 【问】 remains a stance and an empty note uses its message body', async () => {
