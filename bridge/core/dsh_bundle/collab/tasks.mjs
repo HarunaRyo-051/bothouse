@@ -873,9 +873,10 @@ export class Tasks {
    */
   awaitingUser(task) {
     if (!this.hub.teamExit?.enabled) return false;
-    return this.db.prepare(`SELECT 1 FROM team_exit_asks WHERE workspace_id = ? AND member_id = ? AND answered = 0
-      AND source_id > ? AND source_id = (SELECT MAX(id) FROM messages WHERE room_id = ? AND author = ?
-        AND deleted = 0 AND card IS NULL) LIMIT 1`)
+    return this.db.prepare(`SELECT 1 FROM team_exit_asks a JOIN messages source ON source.id = a.source_id
+      WHERE a.workspace_id = ? AND a.member_id = ? AND a.answered = 0
+      AND (source.room_id <> a.workspace_id OR (a.source_id > ? AND a.source_id =
+        (SELECT MAX(id) FROM messages WHERE room_id = ? AND author = ? AND deleted = 0 AND card IS NULL))) LIMIT 1`)
       .get(task.room_id, task.owner, task.assign_msg_id ?? 0, task.room_id, task.owner) !== undefined;
   }
 

@@ -3136,6 +3136,7 @@ test('paused work relocates from a workspace claimed by another chat without cha
   assert.equal(tasks.list(1).some(t => t.id === task.id), true);
   assert.equal(tasks.list(2).some(t => t.id === task.id), false);
   assert.equal(hub.store.db.prepare('SELECT workspace_id FROM team_exit_asks WHERE id = ?').get(ask.id).workspace_id, moved.room_id);
+  assert.equal(tasks.awaitingUser(tasks.task(task.id)), true, 'relocated question still holds the watch');
   hub.post(1, { authorKind: 'user', author: 'owner', name: 'Owner', text: '选 A', replyTo: ask.forwarded_id });
   await settle();
   assert.equal(hub.store.db.prepare('SELECT answered FROM team_exit_asks WHERE id = ?').get(ask.id).answered, 1);
