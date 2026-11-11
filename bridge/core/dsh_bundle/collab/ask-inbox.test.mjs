@@ -8,6 +8,40 @@ import { asksRoute } from './plugin.mjs';
 import { ChannelApprovals } from './approvals.mjs';
 
 const tick = () => new Promise(resolve => setImmediate(resolve));
+test('workspace approval shares one request across channel and workspace', async () => {
+  const store = new Store(':memory:');
+  try {
+    store.ensureRoom(1, 'chat');
+    const hub = new Hub(store, { warn() {}, info() {} });
+    hub.setMember({ id: 'ds', name: 'Astra', kind: 'dsh', online: true });
+    const ws = store.createWorkspace(1);
+    const approvals = ChannelApprovals.of(hub);
+    let executions = 0;
+    for (const [choice, expected] of [['allow', 'allowed'], ['deny', 'denied'], ['allow_all', 'allowed_all']]) {
+      const { messageId, decision } = approvals.open({ room: ws.id, author: { id: 'ds', name: 'Astra' }, text: 'run tests', onDecide() { executions++; } });
+      const copy = store.page(1).find(m => JSON.parse(m.card ?? 'null')?.request_id === messageId);
+      assert.ok(copy, 'the channel has a replyable request reference');
+      approvals.decide(copy.id, choice);
+      assert.equal(await decision, choice);
+      assert.equal(JSON.parse(store.message(messageId).card).state, expected);
+      assert.equal(JSON.parse(store.message(copy.id).card).state, expected);
+      assert.throws(() => approvals.decide(messageId, choice), /已经处理/);
+      assert.throws(() => approvals.decide(copy.id, choice), /已经处理/);
+    }
+    assert.equal(executions, 3);
+    const open = approvals.open({ room: ws.id, author: { id: 'ds', name: 'Astra' }, text: 'text response' });
+    const response = hub.post(1, { authorKind: 'user', author: 'owner', name: 'Owner', text: '拒绝' }).message;
+    approvals.answerByText(response);
+    assert.equal(await open.decision, 'deny');
+    assert.equal(JSON.parse(store.message(open.messageId).card).state, 'denied');
+    const expired = approvals.open({ room: ws.id, author: { id: 'ds', name: 'Astra' }, text: 'cancelled' });
+    const expiredCopy = store.page(1).find(m => JSON.parse(m.card ?? 'null')?.request_id === expired.messageId);
+    approvals.expire(expired.messageId);
+    assert.equal(await expired.decision, 'expired');
+    assert.equal(JSON.parse(store.message(expiredCopy.id).card).state, 'expired');
+  } finally { store.close(); }
+});
+
 test('ask inbox lists only this channel, delivers answers, rearms watch and deduplicates', async () => {
   const store = new Store(':memory:');
   try {
