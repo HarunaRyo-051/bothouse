@@ -257,6 +257,8 @@ export async function apply(ctx, rawConfig) {
       res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'max-age=86400' });
       return res.end(png);
     }
+    const inbox = asksRoute(req, res, path, { store, hub, ownerName: config.ownerName });
+    if (inbox !== undefined) return inbox;
     const m = /^\/collab\/api\/rooms\/(\d+)\/messages$/.exec(path);
     if (m !== null && req.method === 'GET') {
       const roomId = Number(m[1]);
@@ -726,4 +728,29 @@ export function laterRoute(req, res, url, { hub, gateway, owner, later }) {
     });
   }
   return undefined;
+}
+
+/** Owner authentication is enforced by the caller, alongside message posting. */
+export function asksRoute(req, res, path, { store, hub, ownerName }) {
+    const asks = /^\/collab\/api\/rooms\/(\d+)\/asks$/.exec(path);
+    if (asks && req.method === 'GET') {
+      const roomId = Number(asks[1]);
+      if (!store.room(roomId)) return json(res, 404, { error: 'room not found' });
+      return json(res, 200, { asks: hub.teamExit.pending(roomId) });
+    }
+    const answer = /^\/collab\/api\/asks\/(ask-[0-9a-f]{8})\/answer$/.exec(path);
+    if (answer && req.method === 'POST') {
+      return withBody(req, res, body => {
+        const ask = store.db.prepare('SELECT * FROM team_exit_asks WHERE id = ?').get(answer[1]);
+        if (!ask || !store.room(ask.parent_id)) throw new CollabError('room-missing', 'ask not found');
+        if (ask.answered) return { asks: hub.teamExit.pending(ask.parent_id) };
+        if (typeof body?.text !== 'string' || !body.text.trim()) throw new CollabError('invalid', 'answer text is required');
+        const forwarded = store.message(ask.forwarded_id);
+        if (!forwarded || forwarded.room_id !== ask.parent_id) throw new CollabError('invalid', 'ask channel mismatch');
+        const { message } = hub.post(ask.parent_id, { authorKind: 'user', author: OWNER, name: ownerName,
+          text: body.text, replyTo: ask.forwarded_id, clientKey: `ask-inbox:${ask.id}` });
+        hub.teamExit.onMessage(message);
+        return { asks: hub.teamExit.pending(ask.parent_id) };
+      });
+    }
 }

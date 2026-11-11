@@ -242,7 +242,21 @@ export interface OutboxMessage {
 }
 
 /** Whole panel state; `phase` says whether the service answered. */
+export interface ChannelAsk {
+  readonly id: string
+  readonly task_id: number | null
+  readonly task_title: string
+  readonly workspace_id: number
+  readonly workspace_name: string
+  readonly member_id: string
+  readonly member_name: string
+  readonly text: string
+  readonly asked_at: number
+  readonly minutes_waiting: number
+}
+
 export interface ChannelSnapshot {
+  readonly asks?: readonly ChannelAsk[]
   readonly phase: 'idle' | 'loading' | 'ready' | 'reconnecting' | 'unavailable' | 'unauthorized' | 'error'
   readonly error: string | undefined
   readonly rooms: readonly ChannelRoom[]
@@ -269,6 +283,7 @@ export interface ChannelSnapshot {
 
 /** Actions the panel can take; each returns once the service answered. */
 export interface ChannelActions {
+  answerAsk(id: string, text: string): Promise<void>
   reviewTask(id: number, verdict: 'done' | 'rework', note?: string): Promise<void>
   /** Show another room and load its recent messages. */
   selectRoom(roomId: number): Promise<void>
@@ -334,6 +349,7 @@ export interface ChannelTransport {
 }
 
 type ServiceEvent =
+  | { readonly type: 'asks'; readonly room_id: number; readonly asks: readonly ChannelAsk[] }
   | { readonly type: 'message'; readonly message: ChannelMessage }
   | { readonly type: 'deleted'; readonly id: number; readonly room_id: number }
   | { readonly type: 'members'; readonly members: readonly ChannelMember[] }
@@ -454,8 +470,21 @@ export function createChannelSource(transport: ChannelTransport): {
   const earlyTasks = new Map<number, { chat: number; task: ChannelTask }>()
   const newer = (a: ChannelTask | undefined, b: ChannelTask): boolean => (a?.updated_at ?? -Infinity) <= b.updated_at
 
+  let asksVersion = 0
+  const loadAsks = async (owner: object, roomId: number): Promise<void> => {
+    const epoch = historyEpoch
+    const version = asksVersion
+    try {
+      const result = await request<{ asks: ChannelAsk[] }>(`collab/api/rooms/${roomId}/asks`)
+      if (lifetime === owner && snapshot.roomId === roomId && historyEpoch === epoch && asksVersion === version) set({ asks: result.asks ?? [] })
+    } catch (error) { void error /* The message stream remains usable if the inbox cannot be read. */ }
+  }
+
   const applyEvent = (current: ChannelSnapshot, event: ServiceEvent): ChannelSnapshot => {
     switch (event.type) {
+      case 'asks':
+        asksVersion += 1
+        return event.room_id === current.roomId ? { ...current, asks: event.asks } : current
       case 'message': {
         if (event.message.room_id !== current.roomId) return current
         const rows = new Map(current.messages.map(m => [m.id, m]))
@@ -604,7 +633,7 @@ export function createChannelSource(transport: ChannelTransport): {
       const keepBoard = roomId === previous.roomId
       if (!keepBoard) earlyTasks.clear()
       let next: ChannelSnapshot = {
-        phase: 'ready', error: undefined, rooms: state.rooms, roomId,
+        phase: 'ready', error: undefined, rooms: state.rooms, roomId, asks: roomId === previous.roomId ? previous.asks : [],
         members: state.members, thinking: state.thinking, noDispatchByRoom: state.no_dispatch_by_room, messages: rows, hasMoreOlder,
         leadId: state.lead_id ?? null, effectiveLeadId: state.effective_lead_id ?? state.lead_id ?? null,
         tasks: keepBoard ? previous.tasks : [], taskChat: keepBoard ? previous.taskChat : undefined,
@@ -613,7 +642,10 @@ export function createChannelSource(transport: ChannelTransport): {
       for (const event of read.events) next = applyEvent(next, event)
       pending = undefined
       set(next)
-      if (roomId !== undefined) void loadBoard(owner, roomId)
+      if (roomId !== undefined) {
+        void loadBoard(owner, roomId)
+        void loadAsks(owner, roomId)
+      }
     } catch (error) {
       if (!current()) return
       pending = undefined
@@ -627,7 +659,7 @@ export function createChannelSource(transport: ChannelTransport): {
     // The old board is not this room's: task events wait in earlyTasks until loadBoard.
     if (roomId !== snapshot.roomId) earlyTasks.clear()
     const shown = outbox.filter(entry => entry.roomId === roomId)
-    set(roomId === snapshot.roomId ? { roomId, messages: [], outbox: shown } : { roomId, messages: [], outbox: shown, tasks: [], taskChat: undefined })
+    set(roomId === snapshot.roomId ? { roomId, messages: [], outbox: shown } : { roomId, messages: [], outbox: shown, tasks: [], taskChat: undefined, asks: [] })
     await refresh(false)
   }
 
@@ -769,6 +801,12 @@ export function createChannelSource(transport: ChannelTransport): {
   }
 
   const actions: ChannelActions = {
+    async answerAsk(id, text) {
+      const roomId = snapshot.roomId
+      const epoch = historyEpoch
+      const result = await request<{ asks: ChannelAsk[] }>(`collab/api/asks/${id}/answer`, json('POST', { text }))
+      if (snapshot.roomId === roomId && historyEpoch === epoch) set({ asks: result.asks })
+    },
     async reviewTask(id, verdict, note) {
       const { task } = await request<{ task: ChannelTask }>(`collab/api/tasks/${id}/review`, json('POST', { verdict, note }))
       set({ tasks: (snapshot.tasks ?? []).map(row => row.id === task.id ? task : row) })

@@ -5,6 +5,12 @@ export const NS = 'discord-channels'
 
 /** Simplified Chinese dictionary and key source. */
 export const zh = {
+  askCount: '{count} 个问题待答复',
+  askWaiting: '等了 {minutes} 分钟',
+  askReply: '答复',
+  askExpand: '展开',
+  askCollapse: '收起',
+  askSend: '发送',
   copyCode: '复制代码',
   copiedCode: '已复制',
   attachmentDownload: '下载',
@@ -216,6 +222,12 @@ export const zh = {
 
 /** English dictionary. */
 export const en: Record<keyof typeof zh, string> = {
+  askCount: '{count} questions awaiting answers',
+  askWaiting: 'Waiting {minutes} minutes',
+  askReply: 'Answer',
+  askExpand: 'Expand',
+  askCollapse: 'Collapse',
+  askSend: 'Send',
   dispatchMode: 'Dispatch mode',
   dispatchSolo: 'Single model, multiple processes — separate tasks on one model',
   dispatchTeam: 'Full team — delegate to team members',

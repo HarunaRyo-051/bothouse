@@ -212,6 +212,21 @@ export class TeamExit {
     }
   }
 
+  pending(parentId) {
+    if (!this.enabled) return [];
+    return this.db.prepare(`SELECT a.*, m.text, m.created_at, s.text AS source_text, r.name AS workspace_name
+      FROM team_exit_asks a JOIN messages m ON m.id = a.forwarded_id
+      JOIN messages s ON s.id = a.source_id JOIN rooms r ON r.id = a.workspace_id
+      WHERE a.parent_id = ? AND a.answered = 0 ORDER BY a.source_id`).all(parentId).map(row => {
+      const taskId = Number(/#(\d+)/.exec(row.source_text)?.[1]) || null;
+      return { id: row.id, task_id: taskId, task_title: this.hub.tasks?.task?.(taskId)?.title ?? '',
+        workspace_id: row.workspace_id, workspace_name: row.workspace_name,
+        member_id: row.member_id, member_name: this.hub.members.get(row.member_id)?.name ?? row.member_id,
+        text: row.text.split('\n').slice(1).join('\n').slice(0, 4000), asked_at: row.created_at,
+        minutes_waiting: Math.max(0, Math.floor((Date.now() / 1000 - row.created_at) / 60)) };
+    });
+  }
+
   answerFor(msg) {
     if (!this.enabled || msg.author_kind !== 'user' || exitTarget(msg)) return;
     const prior = this.db.prepare('SELECT * FROM team_exit_asks WHERE answer_source_id = ?').get(msg.id);
@@ -234,6 +249,7 @@ export class TeamExit {
       this.db.prepare('UPDATE team_exit_asks SET answered = 1, answer_source_id = ? WHERE id = ?').run(msg.id, answer.id);
       // #597 G35: the watch waited on the user (Tasks.watch awaitingUser); it starts again from here.
       this.hub.tasks?.rewatch?.(answer.workspace_id, answer.member_id);
+      this.hub.emit({ type: 'asks', room_id: answer.parent_id, asks: this.pending(answer.parent_id) });
       return message;
     }
     if (msg.author_kind !== 'role') return;
@@ -262,6 +278,7 @@ export class TeamExit {
     const message = this.forward(room, msg, mark.body, record, headline);
     if (ask) {
       this.db.prepare('UPDATE team_exit_asks SET forwarded_id = ? WHERE id = ?').run(message.id, record.id);
+      this.hub.emit({ type: 'asks', room_id: room.parent_id, asks: this.pending(room.parent_id) });
       const tasks = this.hub.tasks;
       // #597 G35: a DSH member's [ask] keeps its task in work and watched (and its workspace, so the
       // answer reaches the same session); a bridge bot's [ask] parks it as before (#280).

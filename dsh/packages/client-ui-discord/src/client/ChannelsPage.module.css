@@ -346,6 +346,27 @@
   margin-top: 6px;
 }
 
+.taskFileForm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.taskFileForm textarea {
+  flex: 1;
+  min-width: 160px;
+  min-height: 64px;
+  padding: 6px 8px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-alias-bg-layer-2);
+  color: inherit;
+  font: inherit;
+  resize: vertical;
+}
+
 .cardTitle {
   font-size: 13px;
   font-weight: 600;

@@ -35,6 +35,29 @@ function deferred<T>() {
 const state = { rooms: [{ id: 1, name: 'general' }, { id: 2, name: 'other' }], members: [], thinking: {} }
 
 describe('channel source', () => {
+  it('loads unanswered asks, answers them and accepts live inbox updates', async () => {
+    const ask = { id: 'ask-12345678', text: 'Choose a color' }
+    const { transport, streams, calls } = fakeTransport((url, init) => {
+      if (url === '/collab/api/state') return json(200, state)
+      if (url.endsWith('/asks')) return json(200, { asks: [ask] })
+      if (url.endsWith('/answer')) {
+        expect(JSON.parse(String(init?.body))).toEqual({ text: 'Blue' })
+        return json(200, { asks: [] })
+      }
+      return json(200, { messages: [] })
+    })
+    const { source, actions } = createChannelSource(transport)
+    const unsubscribe = source.subscribe(() => {})
+    await vi.waitFor(() => expect(source.getSnapshot().asks).toEqual([ask]))
+    await actions.answerAsk(ask.id, 'Blue')
+    expect(source.getSnapshot().asks).toEqual([])
+    expect(calls).toContain('POST /collab/api/asks/ask-12345678/answer')
+    streams[0].onmessage?.({ data: JSON.stringify({ type: 'asks', room_id: 2, asks: [ask] }) } as MessageEvent)
+    expect(source.getSnapshot().asks).toEqual([])
+    streams[0].onmessage?.({ data: JSON.stringify({ type: 'asks', room_id: 1, asks: [ask] }) } as MessageEvent)
+    expect(source.getSnapshot().asks).toEqual([ask])
+    unsubscribe()
+  })
   it('updates settings only in the addressed channel and its workspaces, then explicitly renews', async () => {
     const { transport, streams, calls } = fakeTransport((url, init) => {
       if (url === '/collab/api/state') return json(200, { ...state, rooms: [
@@ -180,7 +203,7 @@ describe('channel source', () => {
     let reads = 0
     const { transport, streams } = fakeTransport((url) => {
       if (url === '/collab/api/state') return json(200, state)
-      if (url.startsWith('/collab/api/rooms/1/')) return ++reads === 2 ? oldRoom.promise : json(200, { messages: [message(1, reads === 1 ? 'first' : 'latest')] })
+      if (url.startsWith('/collab/api/rooms/1/messages')) return ++reads === 2 ? oldRoom.promise : json(200, { messages: [message(1, reads === 1 ? 'first' : 'latest')] })
       return json(200, { messages: [] })
     })
     const { source, actions } = createChannelSource(transport)
