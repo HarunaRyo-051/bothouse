@@ -1,4 +1,4 @@
-// dsh-client-source-sha256: 3d514c6c82329dfe92e231bea638b93935ac408af7e8281ecc7353bc8cfdb7f0
+// dsh-client-source-sha256: 2267e3381c08f8cb337656fe047b81d220a7857e6328bc47d9469a895710319d
 // dsh-style-sha256: c15f13cd91d62ca36feac5bdc1a0d87fccdad9831985d49326c86efc37c17917
 window.__ModuleLoader__.load({
  id: "@deepseek-ai/dsh-experimental-client-ui-discord",
@@ -207,23 +207,24 @@ function createChannelSource(transport) {
 	};
 	const earlyTasks = /* @__PURE__ */ new Map();
 	const newer = (a, b) => (a?.updated_at ?? -Infinity) <= b.updated_at;
-	let asksVersion = 0;
+	const asksVersion = /* @__PURE__ */ new Map();
 	const loadAsks = async (owner, roomId) => {
 		const epoch = historyEpoch;
-		const version = asksVersion;
+		const version = asksVersion.get(roomId) ?? 0;
 		try {
 			const result = await request(`collab/api/rooms/${roomId}/asks`);
-			if (lifetime === owner && snapshot.roomId === roomId && historyEpoch === epoch && asksVersion === version) set({ asks: result.asks ?? [] });
+			if (lifetime === owner && snapshot.roomId === roomId && historyEpoch === epoch && (asksVersion.get(roomId) ?? 0) === version) set({ asks: result.asks ?? [] });
 		} catch (error) {}
 	};
 	const applyEvent = (current, event) => {
 		switch (event.type) {
 			case "asks":
-				asksVersion += 1;
-				return event.room_id === current.roomId ? {
+				if (event.room_id !== current.roomId) return current;
+				asksVersion.set(event.room_id, (asksVersion.get(event.room_id) ?? 0) + 1);
+				return {
 					...current,
 					asks: event.asks
-				} : current;
+				};
 			case "message": {
 				if (event.message.room_id !== current.roomId) return current;
 				const rows = new Map(current.messages.map((m) => [m.id, m]));
@@ -590,11 +591,11 @@ function createChannelSource(transport) {
 			async answerAsk(id, text) {
 				const roomId = snapshot.roomId;
 				const epoch = historyEpoch;
-				const version = asksVersion;
+				const version = roomId === void 0 ? 0 : asksVersion.get(roomId) ?? 0;
 				const result = await request(`collab/api/asks/${id}/answer`, json("POST", { text }));
-				if (snapshot.roomId === roomId && historyEpoch === epoch) {
-					const asks = asksVersion === version ? result.asks : (snapshot.asks ?? []).filter((ask) => ask.id !== id);
-					asksVersion += 1;
+				if (roomId !== void 0 && snapshot.roomId === roomId && historyEpoch === epoch) {
+					const asks = (asksVersion.get(roomId) ?? 0) === version ? result.asks : (snapshot.asks ?? []).filter((ask) => ask.id !== id);
+					asksVersion.set(roomId, (asksVersion.get(roomId) ?? 0) + 1);
 					set({ asks });
 				}
 			},

@@ -470,21 +470,22 @@ export function createChannelSource(transport: ChannelTransport): {
   const earlyTasks = new Map<number, { chat: number; task: ChannelTask }>()
   const newer = (a: ChannelTask | undefined, b: ChannelTask): boolean => (a?.updated_at ?? -Infinity) <= b.updated_at
 
-  let asksVersion = 0
+  const asksVersion = new Map<number, number>()
   const loadAsks = async (owner: object, roomId: number): Promise<void> => {
     const epoch = historyEpoch
-    const version = asksVersion
+    const version = asksVersion.get(roomId) ?? 0
     try {
       const result = await request<{ asks: ChannelAsk[] }>(`collab/api/rooms/${roomId}/asks`)
-      if (lifetime === owner && snapshot.roomId === roomId && historyEpoch === epoch && asksVersion === version) set({ asks: result.asks ?? [] })
+      if (lifetime === owner && snapshot.roomId === roomId && historyEpoch === epoch && (asksVersion.get(roomId) ?? 0) === version) set({ asks: result.asks ?? [] })
     } catch (error) { void error /* The message stream remains usable if the inbox cannot be read. */ }
   }
 
   const applyEvent = (current: ChannelSnapshot, event: ServiceEvent): ChannelSnapshot => {
     switch (event.type) {
       case 'asks':
-        asksVersion += 1
-        return event.room_id === current.roomId ? { ...current, asks: event.asks } : current
+        if (event.room_id !== current.roomId) return current
+        asksVersion.set(event.room_id, (asksVersion.get(event.room_id) ?? 0) + 1)
+        return { ...current, asks: event.asks }
       case 'message': {
         if (event.message.room_id !== current.roomId) return current
         const rows = new Map(current.messages.map(m => [m.id, m]))
@@ -804,12 +805,12 @@ export function createChannelSource(transport: ChannelTransport): {
     async answerAsk(id, text) {
       const roomId = snapshot.roomId
       const epoch = historyEpoch
-      const version = asksVersion
+      const version = roomId === undefined ? 0 : (asksVersion.get(roomId) ?? 0)
       const result = await request<{ asks: ChannelAsk[] }>(`collab/api/asks/${id}/answer`, json('POST', { text }))
-      if (snapshot.roomId === roomId && historyEpoch === epoch) {
+      if (roomId !== undefined && snapshot.roomId === roomId && historyEpoch === epoch) {
         // A newer inbox (SSE or another answer) must not be replaced by this response.
-        const asks = asksVersion === version ? result.asks : (snapshot.asks ?? []).filter(ask => ask.id !== id)
-        asksVersion += 1
+        const asks = (asksVersion.get(roomId) ?? 0) === version ? result.asks : (snapshot.asks ?? []).filter(ask => ask.id !== id)
+        asksVersion.set(roomId, (asksVersion.get(roomId) ?? 0) + 1)
         set({ asks })
       }
     },

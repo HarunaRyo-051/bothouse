@@ -35,6 +35,41 @@ function deferred<T>() {
 const state = { rooms: [{ id: 1, name: 'general' }, { id: 2, name: 'other' }], members: [], thinking: {} }
 
 describe('channel source', () => {
+  it('keeps an in-flight inbox load when another room receives asks', async () => {
+    const ask = { id: 'ask-12345678', text: 'Current room' }
+    const response = deferred<Response>()
+    const { transport, streams, calls } = fakeTransport(url => {
+      if (url === '/collab/api/state') return json(200, state)
+      if (url === '/collab/api/rooms/1/asks') return response.promise
+      return json(200, { messages: [] })
+    })
+    const { source } = createChannelSource(transport)
+    const unsubscribe = source.subscribe(() => {})
+    await vi.waitFor(() => expect(calls).toContain('GET /collab/api/rooms/1/asks'))
+    streams[0].onmessage?.({ data: JSON.stringify({ type: 'asks', room_id: 2, asks: [] }) } as MessageEvent)
+    response.resolve(json(200, { asks: [ask] }))
+    await vi.waitFor(() => expect(source.getSnapshot().asks).toEqual([ask]))
+    unsubscribe()
+  })
+
+  it('does not replace newer same-room asks with an older inbox load', async () => {
+    const live = { id: 'ask-87654321', text: 'New question' }
+    const response = deferred<Response>()
+    const { transport, streams, calls } = fakeTransport(url => {
+      if (url === '/collab/api/state') return json(200, state)
+      if (url === '/collab/api/rooms/1/asks') return response.promise
+      return json(200, { messages: [] })
+    })
+    const { source } = createChannelSource(transport)
+    const unsubscribe = source.subscribe(() => {})
+    await vi.waitFor(() => expect(calls).toContain('GET /collab/api/rooms/1/asks'))
+    streams[0].onmessage?.({ data: JSON.stringify({ type: 'asks', room_id: 1, asks: [live] }) } as MessageEvent)
+    response.resolve(json(200, { asks: [] }))
+    await setImmediate()
+    expect(source.getSnapshot().asks).toEqual([live])
+    unsubscribe()
+  })
+
   it('preserves newer SSE questions when an older answer response arrives', async () => {
     const first = { id: 'ask-12345678', text: 'First' }
     const next = { id: 'ask-87654321', text: 'New question' }
