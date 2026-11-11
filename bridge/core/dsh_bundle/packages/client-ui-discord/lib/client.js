@@ -1,4 +1,4 @@
-// dsh-client-source-sha256: 3d514c6c82329dfe92e231bea638b93935ac408af7e8281ecc7353bc8cfdb7f0
+// dsh-client-source-sha256: 0755ddf6ef394644219ea621dd684416cc455388bb30cb0ce4ce686e3c51b4f4
 // dsh-style-sha256: c15f13cd91d62ca36feac5bdc1a0d87fccdad9831985d49326c86efc37c17917
 window.__ModuleLoader__.load({
  id: "@deepseek-ai/dsh-experimental-client-ui-discord",
@@ -216,6 +216,15 @@ function createChannelSource(transport) {
 			if (lifetime === owner && snapshot.roomId === roomId && historyEpoch === epoch && asksVersion === version) set({ asks: result.asks ?? [] });
 		} catch (error) {}
 	};
+	let pendingVersion = 0;
+	const loadPending = async (owner, roomId) => {
+		const epoch = historyEpoch;
+		const version = ++pendingVersion;
+		try {
+			const result = await request(`collab/api/rooms/${roomId}/pending`);
+			if (lifetime === owner && snapshot.roomId === roomId && historyEpoch === epoch && pendingVersion === version) set({ pendingItems: [...result.approval ?? [], ...result.failed ?? []] });
+		} catch (error) {}
+	};
 	const applyEvent = (current, event) => {
 		switch (event.type) {
 			case "asks":
@@ -308,6 +317,11 @@ function createChannelSource(transport) {
 	const onEvent = (event) => {
 		pending?.events.push(event);
 		set(applyEvent(snapshot, event));
+		if (lifetime && snapshot.roomId !== void 0 && [
+			"message",
+			"deleted",
+			"rooms"
+		].includes(event.type)) loadPending(lifetime, snapshot.roomId);
 	};
 	let boardRead;
 	const loadBoard = async (owner, roomId) => {
@@ -395,6 +409,7 @@ function createChannelSource(transport) {
 				rooms: state.rooms,
 				roomId,
 				asks: roomId === previous.roomId ? previous.asks : [],
+				pendingItems: roomId === previous.roomId ? previous.pendingItems : [],
 				members: state.members,
 				thinking: state.thinking,
 				noDispatchByRoom: state.no_dispatch_by_room,
@@ -412,6 +427,7 @@ function createChannelSource(transport) {
 			if (roomId !== void 0) {
 				loadBoard(owner, roomId);
 				loadAsks(owner, roomId);
+				loadPending(owner, roomId);
 			}
 		} catch (error) {
 			if (!current()) return;
@@ -433,7 +449,8 @@ function createChannelSource(transport) {
 			outbox: shown,
 			tasks: [],
 			taskChat: void 0,
-			asks: []
+			asks: [],
+			pendingItems: []
 		});
 		await refresh(false);
 	};
@@ -17515,19 +17532,46 @@ function AskRow({ ask, answer, t }) {
 		})
 	] });
 }
-function AskInbox({ asks, answer, t }) {
-	if (!asks.length) return null;
+function AskInbox({ asks, answer, items = [], onOpen, t }) {
+	if (!asks.length && !items.length) return null;
+	const approvals = items.filter((item) => item.kind === "approval");
+	const failures = items.filter((item) => item.kind === "failed");
 	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 		className: ChannelsPage_module_default.card,
 		"data-testid": "ask-inbox",
-		children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-			className: ChannelsPage_module_default.cardTitle,
-			children: t("askCount", { count: asks.length })
-		}), asks.map((ask) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(AskRow, {
-			ask,
-			answer,
-			t
-		}, ask.id))]
+		children: [
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: ChannelsPage_module_default.cardTitle,
+				children: [
+					asks.length ? t("askCount", { count: asks.length }) : "",
+					approvals.length ? t("approvalCount", { count: approvals.length }) : "",
+					failures.length ? t("failureCount", { count: failures.length }) : ""
+				].filter(Boolean).join(" · ")
+			}),
+			asks.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("details", {
+				open: true,
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("summary", { children: t("askSection") }), asks.map((ask) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(AskRow, {
+					ask,
+					answer,
+					t
+				}, ask.id))]
+			}),
+			[approvals, failures].map((group, index) => group.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("details", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("summary", { children: t(index === 0 ? "approvalCount" : "failureCount", { count: group.length }) }), group.map((item) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+				type: "button",
+				className: ChannelsPage_module_default.secondaryButton,
+				onClick: () => onOpen?.(item.room_id, item.message_id),
+				children: [
+					item.workspace_name,
+					" · ",
+					item.member_name,
+					" · ",
+					t("askWaiting", { minutes: item.minutes_waiting })
+				]
+			}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: ChannelsPage_module_default.text,
+				children: item.text
+			})] }, item.message_id))] }, index))
+		]
 	});
 }
 // src/client/CapabilityList.tsx
@@ -19801,6 +19845,8 @@ function ChannelsPage({ useChannels, selectRoom, send, reviewTask, answerAsk, cr
 						children: [
 							/* @__PURE__ */ (0, react_jsx_runtime.jsx)(AskInbox, {
 								asks: state.asks ?? [],
+								items: state.pendingItems ?? [],
+								onOpen: openMessage,
 								answer: answerAsk,
 								t
 							}, state.roomId),
@@ -20175,7 +20221,10 @@ function ChannelsPage({ useChannels, selectRoom, send, reviewTask, answerAsk, cr
 const NS = "discord-channels";
 /** Simplified Chinese dictionary and key source. */
 const zh = {
+	approvalCount: "{count} 个权限待批准",
+	failureCount: "{count} 个失败待处理",
 	askCount: "{count} 个问题待答复",
+	askSection: "待答复问题",
 	askWaiting: "等了 {minutes} 分钟",
 	askReply: "答复",
 	askExpand: "展开",
@@ -20390,7 +20439,10 @@ const zh = {
 };
 /** English dictionary. */
 const en = {
+	approvalCount: "{count} permissions awaiting approval",
+	failureCount: "{count} failures needing attention",
 	askCount: "{count} questions awaiting answers",
+	askSection: "Questions awaiting answers",
 	askWaiting: "Waiting {minutes} minutes",
 	askReply: "Answer",
 	askExpand: "Expand",

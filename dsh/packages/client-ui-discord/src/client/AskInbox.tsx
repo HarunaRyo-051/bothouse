@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
-import type { ChannelAsk, ChannelActions } from './channel-source.ts'
+import type { ChannelAsk, ChannelActions, ChannelPendingItem } from './channel-source.ts'
 import type { NS } from './locales.ts'
 import css from './ChannelsPage.module.css'
 
@@ -32,10 +32,19 @@ function AskRow({ ask, answer, t }: { ask: ChannelAsk; answer: ChannelActions['a
   </div>
 }
 
-export function AskInbox({ asks, answer, t }: { asks: readonly ChannelAsk[]; answer: ChannelActions['answerAsk']; t: T }) {
-  if (!asks.length) return null
+export function AskInbox({ asks, answer, items = [], onOpen, t }: { asks: readonly ChannelAsk[]; answer: ChannelActions['answerAsk']; items?: readonly ChannelPendingItem[]; onOpen?: (room: number, message: number) => void; t: T }) {
+  if (!asks.length && !items.length) return null
+  const approvals = items.filter(item => item.kind === 'approval')
+  const failures = items.filter(item => item.kind === 'failed')
   return <div className={css.card} data-testid="ask-inbox">
-    <div className={css.cardTitle}>{t('askCount', { count: asks.length })}</div>
-    {asks.map(ask => <AskRow key={ask.id} ask={ask} answer={answer} t={t} />)}
+    <div className={css.cardTitle}>{[asks.length ? t('askCount', { count: asks.length }) : '', approvals.length ? t('approvalCount', { count: approvals.length }) : '', failures.length ? t('failureCount', { count: failures.length }) : ''].filter(Boolean).join(' · ')}</div>
+    {asks.length > 0 && <details open><summary>{t('askSection')}</summary>{asks.map(ask => <AskRow key={ask.id} ask={ask} answer={answer} t={t} />)}</details>}
+    {[approvals, failures].map((group, index) => group.length > 0 && <details key={index}>
+      <summary>{t(index === 0 ? 'approvalCount' : 'failureCount', { count: group.length })}</summary>
+      {group.map(item => <div key={item.message_id}>
+        <button type="button" className={css.secondaryButton} onClick={() => onOpen?.(item.room_id, item.message_id)}>{item.workspace_name} · {item.member_name} · {t('askWaiting', { minutes: item.minutes_waiting })}</button>
+        <div className={css.text}>{item.text}</div>
+      </div>)}
+    </details>)}
   </div>
 }

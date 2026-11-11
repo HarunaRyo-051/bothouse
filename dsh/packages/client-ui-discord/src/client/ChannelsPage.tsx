@@ -673,7 +673,7 @@ export function ChannelsPage({ useChannels, selectRoom, send, reviewTask, answer
             stickRef.current = el.scrollTop + el.clientHeight >= el.scrollHeight - 40
           }}
         >
-          <AskInbox key={state.roomId} asks={state.asks ?? []} answer={answerAsk} t={t} />
+          <AskInbox key={state.roomId} asks={state.asks ?? []} items={state.pendingItems ?? []} onOpen={openMessage} answer={answerAsk} t={t} />
           {!visibleMembers.some(m => m.kind !== 'human') && (
             <div className={css.guide}>
               <div>{t('guideNoMembers')}</div>

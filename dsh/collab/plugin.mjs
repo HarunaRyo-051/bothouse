@@ -732,6 +732,32 @@ export function laterRoute(req, res, url, { hub, gateway, owner, later }) {
 
 /** Owner authentication is enforced by the caller, alongside message posting. */
 export function asksRoute(req, res, path, { store, hub, ownerName }) {
+    const pending = /^\/collab\/api\/rooms\/(\d+)\/pending$/.exec(path);
+    if (pending && req.method === 'GET') {
+      const roomId = Number(pending[1]);
+      if (!store.room(roomId)) return json(res, 404, { error: 'room not found' });
+      const approval = [], failed = [];
+      const rows = store.db.prepare(`SELECT m.*, r.name AS workspace_name FROM messages m
+        JOIN rooms r ON r.id = m.room_id WHERE r.kind = 'workspace' AND r.parent_id = ? AND r.free = 0
+        AND m.card IS NOT NULL ORDER BY m.id DESC`).all(roomId);
+      const seenJobs = new Set();
+      for (const row of rows) {
+        let card;
+        try { card = JSON.parse(row.card); } catch { continue; }
+        const memberId = card.member_id ?? row.author;
+        const item = { room_id: row.room_id, workspace_name: row.workspace_name, message_id: row.id,
+          member_id: memberId, member_name: hub.members.get(memberId)?.name ?? row.name,
+          text: row.text, minutes_waiting: Math.max(0, Math.floor((Date.now() / 1000 - row.created_at) / 60)) };
+        if (card.kind === 'permission' && card.state === 'pending' && hub.approvals?.pending.has(row.id)) {
+          approval.push({ ...item, kind: 'approval', request_id: card.request_id ?? row.id });
+        } else if ((card.state === 'failed' || card.action === 'configure-model') && card.job_id != null && !seenJobs.has(card.job_id)) {
+          seenJobs.add(card.job_id);
+          const job = store.job(card.job_id);
+          if (job && ['failed', 'interrupted'].includes(job.state)) failed.push({ ...item, kind: 'failed', job_id: card.job_id, action: card.action });
+        }
+      }
+      return json(res, 200, { ask: hub.teamExit.pending(roomId), approval, failed });
+    }
     const asks = /^\/collab\/api\/rooms\/(\d+)\/asks$/.exec(path);
     if (asks && req.method === 'GET') {
       const roomId = Number(asks[1]);
