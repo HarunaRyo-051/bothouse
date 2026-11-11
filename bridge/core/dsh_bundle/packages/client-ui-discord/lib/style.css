@@ -492,6 +492,77 @@
   flex: none;
 }
 
+.dshc_inbox {
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-alias-bg-layer-1, var(--dsw-alias-bg-layer-2));
+  margin: 0 16px 8px;
+}
+
+.dshc_inboxToggle {
+  width: 100%;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  background: none;
+  border: 0;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  font-size: 13px;
+  display: flex;
+}
+
+.dshc_inboxList {
+  border-top: 1px solid var(--dsw-alias-border-l1);
+  max-height: min(45vh, 360px);
+  overflow-y: auto;
+}
+
+.dshc_inboxRow {
+  border-top: 1px solid var(--dsw-alias-border-l1);
+  padding: 10px;
+}
+
+.dshc_inboxRow:first-child {
+  border-top: 0;
+}
+
+.dshc_inboxMeta {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.dshc_inboxText {
+  white-space: break-spaces;
+  overflow-wrap: anywhere;
+  margin: 6px 0;
+  font-size: 13px;
+}
+
+.dshc_inboxActions, .dshc_inboxForm {
+  align-items: flex-end;
+  gap: 8px;
+  margin-top: 6px;
+  display: flex;
+}
+
+.dshc_inboxForm textarea {
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-alias-bg-base);
+  min-width: 0;
+  min-height: 44px;
+  color: inherit;
+  font: inherit;
+  resize: vertical;
+  flex: 1;
+  padding: 6px;
+}
+
 .dshc_working {
   min-height: 20px;
   color: var(--dsw-alias-label-tertiary);
@@ -948,6 +1019,27 @@
   flex-direction: column;
   gap: 12px;
   display: flex;
+}
+
+.dshc_multiSelect {
+  position: relative;
+}
+
+.dshc_multiSelect > button {
+  text-align: left;
+  overflow-wrap: anywhere;
+  width: 100%;
+}
+
+.dshc_multiSelectOptions {
+  border: 1px solid var(--dsw-alias-border-default, #777);
+  background: var(--dsw-alias-background-primary, #fff);
+  flex-direction: column;
+  gap: 8px;
+  max-height: 180px;
+  padding: 8px;
+  display: flex;
+  overflow-y: auto;
 }
 
 .dshc_settingsFeedback {

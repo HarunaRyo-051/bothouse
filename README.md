@@ -66,7 +66,7 @@ The Windows command, package downloads, the background service and the DSH chann
 
 ## What you can do with it
 
-In DSH channels, unanswered workspace questions appear in a card at the top of the message stream. Choose **Answer**, type your reply, and send it to resume the waiting work. Answered questions disappear from the card.
+In DSH channels, pending workspace questions, approvals and failed jobs appear in a bar above the message composer. Expand it to read the request and answer, approve, deny or retry in place. Completed items disappear from the bar.
 
 | You want | How bothouse helps |
 | --- | --- |

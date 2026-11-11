@@ -775,11 +775,14 @@ export function asksRoute(req, res, path, { store, hub, ownerName }) {
         JOIN rooms r ON r.id = m.room_id WHERE r.kind = 'workspace' AND r.parent_id = ? AND r.free = 0
         AND m.card IS NOT NULL ORDER BY m.id DESC`).all(roomId);
       const seenJobs = new Set();
+      const activeTasks = hub.tasks?.q?.allBusy?.all('assigned', 'accepted', 'asked', 'rework') ?? [];
       for (const row of rows) {
         let card;
         try { card = JSON.parse(row.card); } catch { continue; }
         const memberId = card.member_id ?? row.author;
+        const task = activeTasks.find(t => t.room_id === row.room_id && t.owner === memberId);
         const item = { room_id: row.room_id, workspace_name: row.workspace_name, message_id: row.id,
+          task_id: task?.id ?? null, task_title: task?.title ?? '',
           member_id: memberId, member_name: hub.members.get(memberId)?.name ?? row.name,
           text: row.text, minutes_waiting: Math.max(0, Math.floor((Date.now() / 1000 - row.created_at) / 60)) };
         if (card.kind === 'permission' && card.state === 'pending' && hub.approvals?.pending.has(row.id)) {

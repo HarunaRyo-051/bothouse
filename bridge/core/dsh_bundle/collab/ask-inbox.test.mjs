@@ -52,6 +52,7 @@ test('ask inbox lists only this channel, delivers answers, rearms watch and dedu
     hub.tasks = { task: id => id === 1 ? { id, title: 'Question' } : undefined, rewatch() { rearmed++; } };
     hub.teamExit = new TeamExit(hub);
     const ws = store.createWorkspace(1);
+    hub.tasks.q = { allBusy: { all: () => [{ id: 1, title: 'Question', room_id: ws.id, owner: 'ds' }] } };
     hub.post(ws.id, { authorKind: 'role', author: 'ds', name: 'Astra', text: '【问】#1 背景：选颜色\n已经试过。\n要你做的：选择红色还是蓝色\n我加的：无\n自验：无需\n类别：方向' });
     await tick();
     async function request(method, path, body) {
@@ -72,6 +73,11 @@ test('ask inbox lists only this channel, delivers answers, rearms watch and dedu
     assert.equal(pending.approval.length, 1);
     assert.equal(pending.failed.length, 1);
     assert.equal(pending.approval[0].message_id, permission.messageId);
+    assert.equal(pending.approval[0].request_id, permission.messageId);
+    assert.equal(pending.approval[0].task_id, 1);
+    assert.equal(pending.approval[0].task_title, 'Question');
+    assert.equal(pending.approval[0].text, 'run tests');
+    assert.match(pending.ask[0].text, /选择红色还是蓝色/);
     assert.equal(pending.failed[0].job_id, job.id);
     assert.deepEqual((await request('GET', '/collab/api/rooms/2/pending')).approval, []);
     approvals.decide(permission.messageId, 'deny');

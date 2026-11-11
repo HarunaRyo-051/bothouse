@@ -668,7 +668,6 @@ export function ChannelsPage({ useChannels, selectRoom, send, reviewTask, reloca
             stickRef.current = el.scrollTop + el.clientHeight >= el.scrollHeight - 40
           }}
         >
-          <AskInbox key={state.roomId} asks={state.asks ?? []} items={state.pendingItems ?? []} onOpen={openMessage} answer={answerAsk} t={t} />
           {!visibleMembers.some(m => m.kind !== 'human') && (
             <div className={css.guide}>
               <div>{t('guideNoMembers')}</div>
@@ -700,6 +699,7 @@ export function ChannelsPage({ useChannels, selectRoom, send, reviewTask, reloca
                 />
               ))}
         </div>
+        {room?.kind !== 'workspace' && <AskInbox key={state.roomId} asks={state.asks ?? []} items={state.pendingItems ?? []} answer={answerAsk} decide={decidePermission} retry={retryMessage} t={t} />}
         <div className={css.working} aria-live="polite">{typingNames.length > 0 ? t('workingList', { names: typingNames.join('、') }) : ''}</div>
         <div className={css.composer} ref={composerRef}>
           {draft === '/' && !capabilitiesDismissed && <CapabilityList key={state.roomId} t={t} onClose={() => { setCapabilitiesDismissed(true) }} />}

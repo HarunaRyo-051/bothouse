@@ -259,6 +259,9 @@ export interface ChannelAsk {
 
 export interface ChannelPendingItem {
   readonly kind: 'approval' | 'failed'
+  readonly task_id: number | null
+  readonly task_title: string
+  readonly request_id?: number
   readonly room_id: number
   readonly message_id: number
   readonly workspace_name: string
@@ -955,7 +958,10 @@ export function createChannelSource(transport: ChannelTransport): {
     async decidePermission(messageId, decision) {
       const owner = lifetime
       const { message } = await request<{ message: ChannelMessage }>(`collab/api/messages/${messageId}/permission`, json('POST', { decision }))
-      if (lifetime === owner) onEvent({ type: 'message', message })
+      if (lifetime === owner) {
+        onEvent({ type: 'message', message })
+        if (snapshot.roomId !== undefined) await loadPending(owner!, snapshot.roomId)
+      }
     },
     async loadOlder() {
       const roomId = snapshot.roomId
@@ -1008,6 +1014,7 @@ export function createChannelSource(transport: ChannelTransport): {
     },
     async retryMessage(messageId) {
       await request<{ ok: boolean }>(`collab/api/messages/${messageId}/retry`, { method: 'POST' })
+      if (lifetime && snapshot.roomId !== undefined) await loadPending(lifetime, snapshot.roomId)
     },
     async editMessage(messageId, text) {
       const owner = lifetime
