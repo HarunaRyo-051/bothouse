@@ -321,7 +321,8 @@ export interface ChannelActions {
   updateMember(id: string, input: MemberInput): Promise<void>
   /** Remove a UI-created DSH member. */
   removeMember(id: string): Promise<void>
-  setNoDispatch(roomId: number, id: string, blocked: boolean): Promise<void>
+  getNoDispatch(roomId: number): Promise<readonly string[]>
+  replaceNoDispatch(roomId: number, blocked: readonly string[]): Promise<readonly string[]>
   /** Select the member that owns the primary-role slot for this collab service. */
   setDispatchMode(roomId: number, mode: DispatchMode): Promise<void>
   /** Set the channel's relay cap (6–20, #445); workspaces write through to their chat channel. */
@@ -905,10 +906,19 @@ export function createChannelSource(transport: ChannelTransport): {
     async removeMember(id) {
       await request(`collab/api/members/${encodeURIComponent(id)}`, { method: 'DELETE' })
     },
-    async setNoDispatch(roomId, id, blocked) {
-      await request(`collab/api/rooms/${roomId}/members/${encodeURIComponent(id)}/no-dispatch`, json('PATCH', { no_dispatch: blocked }))
+    async getNoDispatch(roomId) {
+      const result = await request<{ blocked: string[] }>(`collab/api/rooms/${roomId}/no-dispatch`)
+      return result.blocked
+    },
+    async replaceNoDispatch(roomId, blocked) {
+      const result = await request<{ blocked: string[] }>(`collab/api/rooms/${roomId}/no-dispatch`, json('PUT', { blocked }))
       const chatId = snapshot.rooms.find(r => r.id === roomId)?.parent_id ?? roomId
-      set({ noDispatchByRoom: { ...snapshot.noDispatchByRoom, [chatId]: { ...snapshot.noDispatchByRoom?.[chatId], [id]: blocked } } })
+      const selected = new Set(result.blocked)
+      const current = snapshot.noDispatchByRoom?.[chatId] ?? {}
+      const ids = new Set([...Object.keys(current), ...snapshot.members.map(member => member.id)])
+      const noDispatchByRoom = { ...snapshot.noDispatchByRoom, [chatId]: Object.fromEntries([...ids].map(id => [id, selected.has(id)])) }
+      set({ noDispatchByRoom })
+      return result.blocked
     },
     async setDispatchMode(roomId, mode) {
       const result = await request<{ dispatch_mode: DispatchMode; dispatch_explicit: boolean }>(`collab/api/rooms/${roomId}/mode`, json('PATCH', { dispatch_mode: mode }))

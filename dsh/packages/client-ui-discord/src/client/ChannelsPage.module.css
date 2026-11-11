@@ -969,6 +969,19 @@
   gap: 12px;
 }
 
+.multiSelect { position: relative; }
+.multiSelect > button { width: 100%; text-align: left; overflow-wrap: anywhere; }
+.multiSelectOptions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 180px;
+  overflow-y: auto;
+  padding: 8px;
+  border: 1px solid var(--dsw-alias-border-default, #777);
+  background: var(--dsw-alias-background-primary, #fff);
+}
+
 .settingsFeedback {
   max-height: 20%;
   overflow-y: auto;
