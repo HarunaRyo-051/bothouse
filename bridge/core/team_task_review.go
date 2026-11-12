@@ -185,49 +185,7 @@ func (w *handoffWatch) reconcileTaskReviews(now time.Time, roundup bool) {
 	groups := map[string]*group{}
 	for _, it := range readTeamTaskBoard(e.team.dir) {
 		if it.Paused != "" {
-			if it.Chat == "" {
-				continue
-			}
-			var owner, lead *Engine
-			for _, x := range w.engines() {
-				if x.timerScheduler == nil {
-					continue
-				}
-				if x.name == it.PausedBy {
-					owner = x
-				}
-				if x.isTeamLead() {
-					lead = x
-				}
-			}
-			if owner == nil {
-				owner = lead
-			}
-			if owner == nil {
-				continue
-			}
-			ref := taskReviewRef{Board: it.ID, Paused: taskPauseKey(it), Stage: "paused"}
-			at := taskPausedSince(it, now)
-			asked := false
-			if !at.IsZero() && now.Sub(at) >= teamWorkspaceReconcileEvery {
-				ref.Stage = "paused-question"
-				sum := sha256.Sum256([]byte(fmt.Sprintf("%s/%d/%s/pause", e.team.dir, it.ID, ref.Paused)))
-				id := fmt.Sprintf("review-%x", sum)
-				asked = owner.timerScheduler.store.Get(id) == nil
-				owner.queueTaskReview(id, it.Chat, &ref, now)
-			}
-			// The fresh paused-question already covers this item; listing it in the
-			// same-scan roundup fired a second identical reminder (11-02 #589/#705 x2).
-			if roundup && !asked {
-				key := owner.name + "/" + it.Chat
-				g := groups[key]
-				if g == nil {
-					g = &group{reviewer: owner, chat: it.Chat}
-					groups[key] = g
-				}
-				ref.Stage = "paused"
-				g.refs = append(g.refs, ref)
-			}
+			// Paused work waits for its owner to resume; it is not due for hourly review.
 			continue
 		}
 		if it.ReturnedAt.IsZero() || it.Chat == "" {
@@ -341,13 +299,7 @@ func (e *Engine) prepareTaskReview(job *TimerJob, now time.Time) (*TimerJob, err
 			continue
 		}
 		if r.Paused != "" {
-			at := taskPausedSince(*it, now)
-			span := teamTaskTableSpan(at, now)
-			prompts = append(prompts, e.i18n.Tf(MsgTaskPausedSummary, it.ID, it.What, span, it.PauseWhy))
-			if r.Stage == "paused-question" {
-				prompts = append(prompts, e.i18n.Tf(MsgTaskPausedResumeQuestion, it.ID))
-			}
-			title = e.i18n.T(MsgTaskReviewRoundup)
+			// A queued reminder from an older bridge must also be a no-op.
 			continue
 		}
 		it.reviewAfter = e.taskReviewAfter()
