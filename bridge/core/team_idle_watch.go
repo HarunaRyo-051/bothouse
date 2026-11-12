@@ -288,7 +288,7 @@ func (e *Engine) watchTurnEnded(p Platform, key, text string, worked, failed, ca
 	if kind, body, ok := parseExitKind(text); ok && kind == exitKindAsk {
 		returned = askEvidenceProblems(body) == nil
 		asking = true
-	} else if ok && returned && !e.exitHeadlineOK(body) && e.exitBounceCount(key) < exitRules.Bounce.WakeLimit {
+	} else if id, _, _ := exitHeadline(body); ok && returned && id > 0 && !e.exitHeadlineOK(body) && e.exitBounceCount(key) < exitRules.Bounce.WakeLimit {
 		// A [report] bounced for its headline (forwardWorkspaceExit) is resent, not handed back yet.
 		returned = false
 	}
@@ -416,9 +416,8 @@ func (e *Engine) watchTurnEnded(p Platform, key, text string, worked, failed, ca
 				return
 			}
 			h.Idle.Fails = 0
-			if worked {
+			if worked && !h.Idle.Reported {
 				h.Idle.Wakes = 0
-				h.Idle.Reported = false
 			}
 		})
 		if ok && giveUp {
