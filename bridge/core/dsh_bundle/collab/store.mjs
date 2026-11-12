@@ -708,7 +708,12 @@ export class Store {
     this.releaseIdleWorkspaces();
     const counts = new Map(this.db.prepare(`SELECT room_id, COUNT(*) AS n FROM tasks
       WHERE status IN ('assigned', 'accepted', 'asked', 'rework') GROUP BY room_id`).all().map(t => [t.room_id, t.n]));
-    return this.rooms().map(r => ({ ...r, active: counts.get(r.id) ?? 0, ...this.dispatchSetting(r.id), ...this.relaySetting(r.id) }));
+    // last_active_at: when the room last got a message. The room list sorts by it, so the channels
+    // people actually use float up instead of the creation order.
+    const last = new Map(this.db.prepare(`SELECT room_id, MAX(created_at) AS at FROM messages
+      WHERE deleted = 0 GROUP BY room_id`).all().map(m => [m.room_id, m.at]));
+    return this.rooms().map(r => ({ ...r, active: counts.get(r.id) ?? 0, last_active_at: last.get(r.id) ?? null,
+      ...this.dispatchSetting(r.id), ...this.relaySetting(r.id) }));
   }
 
   /**

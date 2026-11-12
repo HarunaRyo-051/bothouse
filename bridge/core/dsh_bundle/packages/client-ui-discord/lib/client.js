@@ -1,4 +1,4 @@
-// dsh-client-source-sha256: 7d85cc734bd9d95479cf2381b0ca287b8f89d64a382de5eea0a69ff4b56badcb
+// dsh-client-source-sha256: dfb50a981467e7cd6ed683d0f353122d499cf3f0dfcc7f2c656aecbacd8606b4
 // dsh-style-sha256: 6ddfda1aa899e8afde44c27f4f41cd6d3a0af8daacacaafea6dc12783684e9b4
 window.__ModuleLoader__.load({
  id: "@deepseek-ai/dsh-experimental-client-ui-discord",
@@ -67,11 +67,33 @@ const readAttachment = async (file) => {
 * chat channel is missing is shown at the top level so it stays reachable.
 */
 function groupRooms(rooms) {
+	const at = (room) => room.last_active_at ?? 0;
+	const ranked = rooms.some((room) => at(room) > 0);
+	const byActivity = ranked ? [...rooms].filter((r) => r.kind !== "workspace").map((room, index) => ({
+		room,
+		index
+	})).sort((a, b) => at(b.room) - at(a.room) || a.index - b.index).map((entry) => entry.room) : rooms.filter((r) => r.kind !== "workspace");
 	const chats = new Set(rooms.filter((r) => r.kind !== "workspace").map((r) => r.id));
 	const under = /* @__PURE__ */ new Map();
 	for (const r of rooms) if (r.kind === "workspace" && r.parent_id != null && chats.has(r.parent_id)) under.set(r.parent_id, [...under.get(r.parent_id) ?? [], r]);
 	const rows = [];
-	for (const r of rooms) if (r.kind !== "workspace") {
+	if (!ranked) {
+		for (const r of rooms) if (r.kind !== "workspace") {
+			rows.push({
+				room: r,
+				depth: 0
+			});
+			for (const w of under.get(r.id) ?? []) rows.push({
+				room: w,
+				depth: 1
+			});
+		} else if (r.parent_id == null || !chats.has(r.parent_id)) rows.push({
+			room: r,
+			depth: 0
+		});
+		return rows;
+	}
+	for (const r of byActivity) {
 		rows.push({
 			room: r,
 			depth: 0
@@ -80,7 +102,8 @@ function groupRooms(rooms) {
 			room: w,
 			depth: 1
 		});
-	} else if (r.parent_id == null || !chats.has(r.parent_id)) rows.push({
+	}
+	for (const r of rooms) if (r.kind === "workspace" && (r.parent_id == null || !chats.has(r.parent_id))) rows.push({
 		room: r,
 		depth: 0
 	});

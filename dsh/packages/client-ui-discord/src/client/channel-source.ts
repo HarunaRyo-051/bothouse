@@ -166,6 +166,8 @@ export interface ChannelRoom {
   readonly parent_id?: number | null
   /** Tasks in progress in this room. */
   readonly active?: number
+  /** Unix seconds of the room's last message; absent on older services. */
+  readonly last_active_at?: number | null
 }
 
 /** One row of the channel list: a chat channel at depth 0, its workspaces at depth 1. */
@@ -179,6 +181,17 @@ export interface RoomRow {
  * chat channel is missing is shown at the top level so it stays reachable.
  */
 export function groupRooms(rooms: readonly ChannelRoom[]): RoomRow[] {
+  // Most recently used chat channels first; a channel never used falls back to its position so the
+  // list does not shuffle between reloads.
+  const at = (room: ChannelRoom): number => room.last_active_at ?? 0
+  // An older service sends no activity time at all: keep its order untouched.
+  const ranked = rooms.some(room => at(room) > 0)
+  const byActivity = ranked
+    ? [...rooms].filter(r => r.kind !== 'workspace')
+      .map((room, index) => ({ room, index }))
+      .sort((a, b) => at(b.room) - at(a.room) || a.index - b.index)
+      .map(entry => entry.room)
+    : rooms.filter(r => r.kind !== 'workspace')
   const chats = new Set(rooms.filter(r => r.kind !== 'workspace').map(r => r.id))
   const under = new Map<number, ChannelRoom[]>()
   for (const r of rooms) {
@@ -187,13 +200,24 @@ export function groupRooms(rooms: readonly ChannelRoom[]): RoomRow[] {
     }
   }
   const rows: RoomRow[] = []
-  for (const r of rooms) {
-    if (r.kind !== 'workspace') {
-      rows.push({ room: r, depth: 0 })
-      for (const w of under.get(r.id) ?? []) rows.push({ room: w, depth: 1 })
-    } else if (r.parent_id == null || !chats.has(r.parent_id)) {
-      rows.push({ room: r, depth: 0 })
+  if (!ranked) {
+    for (const r of rooms) {
+      if (r.kind !== 'workspace') {
+        rows.push({ room: r, depth: 0 })
+        for (const w of under.get(r.id) ?? []) rows.push({ room: w, depth: 1 })
+      } else if (r.parent_id == null || !chats.has(r.parent_id)) {
+        rows.push({ room: r, depth: 0 })
+      }
     }
+    return rows
+  }
+  for (const r of byActivity) {
+    rows.push({ room: r, depth: 0 })
+    for (const w of under.get(r.id) ?? []) rows.push({ room: w, depth: 1 })
+  }
+  // A workspace whose chat channel is missing stays top level so it stays reachable.
+  for (const r of rooms) {
+    if (r.kind === 'workspace' && (r.parent_id == null || !chats.has(r.parent_id))) rows.push({ room: r, depth: 0 })
   }
   return rows
 }
