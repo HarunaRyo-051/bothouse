@@ -1,4 +1,4 @@
-// dsh-client-source-sha256: ef394fb7899807135539bece7898ce3035d888852f4553bf366d94f5be2ff8d8
+// dsh-client-source-sha256: de7ebd1f49631e9cc9cf97da9ffcb6b510b83ce0dfe8fd15d0ea4c71e5d799b2
 // dsh-style-sha256: d12ba9753f77f197fda74b720711b36f8d5b21aa8ed7144c7eb066cb0dc639b5
 window.__ModuleLoader__.load({
  id: "@deepseek-ai/dsh-experimental-client-ui-discord",
@@ -17142,8 +17142,6 @@ function TaskBoard({ tasks, rooms, chatId, roomId, t, onOpen, onReview, onReloca
 	const [opened, setOpened] = (0, react.useState)(false);
 	const [selectedTab, setSelectedTab] = (0, react.useState)(BOARD_TABS.find((tab) => tab.initial).id);
 	const [reviewing, setReviewing] = (0, react.useState)();
-	const [terminating, setTerminating] = (0, react.useState)();
-	const [terminateReason, setTerminateReason] = (0, react.useState)("");
 	const [reason, setReason] = (0, react.useState)("");
 	const [saving, setSaving] = (0, react.useState)(false);
 	const [error, setError] = (0, react.useState)();
@@ -17180,12 +17178,11 @@ function TaskBoard({ tasks, rooms, chatId, roomId, t, onOpen, onReview, onReloca
 	const matches = (task) => activeTab.statuses.length === 0 || activeTab.statuses.includes(task.status);
 	const visibleCount = scopedTasks.filter(matches).length;
 	const terminate = async (id) => {
+		if (!window.confirm(t("taskTerminateConfirm"))) return;
 		setSaving(true);
 		setError(void 0);
 		try {
-			await onTerminate?.(id, terminateReason.trim());
-			setTerminating(void 0);
-			setTerminateReason("");
+			await onTerminate?.(id, t("taskTerminateReason"));
 		} catch (error) {
 			setError(error instanceof Error ? error.message : String(error));
 		} finally {
@@ -17277,9 +17274,7 @@ function TaskBoard({ tasks, rooms, chatId, roomId, t, onOpen, onReview, onReloca
 						className: ChannelsPage_module_default.linkButton,
 						disabled: saving,
 						onClick: () => {
-							setTerminating(task.id);
-							setTerminateReason("");
-							setError(void 0);
+							terminate(task.id);
 						},
 						children: t("taskTerminate")
 					}),
@@ -17306,39 +17301,6 @@ function TaskBoard({ tasks, rooms, chatId, roomId, t, onOpen, onReview, onReloca
 						},
 						children: t("taskSendBack")
 					})] })
-				]
-			}),
-			terminating === task.id && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("form", {
-				onSubmit: (event) => {
-					event.preventDefault();
-					terminate(task.id);
-				},
-				children: [
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", { children: [t("taskTerminateReason"), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
-						value: terminateReason,
-						required: true,
-						onChange: (event) => {
-							setTerminateReason(event.target.value);
-						}
-					})] }),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-						className: ChannelsPage_module_default.taskMeta,
-						children: t("taskTerminateHint")
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-						type: "submit",
-						disabled: saving || !terminateReason.trim(),
-						children: t("taskTerminateSubmit")
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-						type: "button",
-						className: ChannelsPage_module_default.linkButton,
-						onClick: () => {
-							setTerminating(void 0);
-							setTerminateReason("");
-						},
-						children: t("cancel")
-					})
 				]
 			}),
 			reviewing === task.id && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("form", {
@@ -20526,9 +20488,8 @@ const zh = {
 	taskSendBack: "要求返工",
 	taskRelocate: "迁入空工位继续",
 	taskTerminate: "终止任务",
-	taskTerminateReason: "终止原因",
-	taskTerminateSubmit: "确认终止",
-	taskTerminateHint: "终止后任务不再计时、不再催办，工作区也会释放；派活人仍能看到记录。",
+	taskTerminateConfirm: "确定终止这个任务吗？终止后不再计时、不再催办，工作区会释放。",
+	taskTerminateReason: "用户在任务板终止",
 	taskReviewReason: "返工原因（必填）",
 	taskReviewSubmit: "提交返工",
 	dispatchMode: "派活方式",
@@ -20728,9 +20689,8 @@ const en = {
 	taskSendBack: "Request rework",
 	taskRelocate: "Move to free workspace",
 	taskTerminate: "Terminate task",
-	taskTerminateReason: "Reason",
-	taskTerminateSubmit: "Confirm terminate",
-	taskTerminateHint: "The task stops being watched and its workspace is released; the dispatcher keeps the record.",
+	taskTerminateConfirm: "Terminate this task? It stops being watched and its workspace is released.",
+	taskTerminateReason: "Terminated from the task board",
 	taskReviewReason: "Reason for rework (required)",
 	taskReviewSubmit: "Submit rework",
 	lead: "Primary role",

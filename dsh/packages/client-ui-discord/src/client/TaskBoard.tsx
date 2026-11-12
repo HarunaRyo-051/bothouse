@@ -37,9 +37,6 @@ export function TaskBoard({ tasks, rooms, chatId, roomId, t, onOpen, onReview, o
   const [opened, setOpened] = useState(false)
   const [selectedTab, setSelectedTab] = useState(BOARD_TABS.find(tab => tab.initial)!.id)
   const [reviewing, setReviewing] = useState<number>()
-  // Terminating is destructive, so it takes a reason and an explicit second click.
-  const [terminating, setTerminating] = useState<number>()
-  const [terminateReason, setTerminateReason] = useState('')
   const [reason, setReason] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string>()
@@ -70,12 +67,12 @@ export function TaskBoard({ tasks, rooms, chatId, roomId, t, onOpen, onReview, o
   const matches = (task: ChannelTask) => activeTab.statuses.length === 0 || activeTab.statuses.includes(task.status)
   const visibleCount = scopedTasks.filter(matches).length
   const terminate = async (id: number) => {
+    // One popup, one question: no reason form on the board.
+    if (!window.confirm(t('taskTerminateConfirm'))) return
     setSaving(true)
     setError(undefined)
     try {
-      await onTerminate?.(id, terminateReason.trim())
-      setTerminating(undefined)
-      setTerminateReason('')
+      await onTerminate?.(id, t('taskTerminateReason'))
     } catch (error) {
       setError(error instanceof Error ? error.message : String(error))
     } finally {
@@ -116,18 +113,12 @@ export function TaskBoard({ tasks, rooms, chatId, roomId, t, onOpen, onReview, o
             void onRelocate(task.id).catch(error => { setError(error instanceof Error ? error.message : String(error)) }).finally(() => { setSaving(false) })
           }}>{t('taskRelocate')}</button>}
         {onTerminate !== undefined && !['done', 'cancelled', 'superseded'].includes(task.status)
-          && <button type="button" className={css.linkButton} disabled={saving} onClick={() => { setTerminating(task.id); setTerminateReason(''); setError(undefined) }}>{t('taskTerminate')}</button>}
+          && <button type="button" className={css.linkButton} disabled={saving} onClick={() => { void terminate(task.id) }}>{t('taskTerminate')}</button>}
         {onReview !== undefined && ['returned', 'declined', 'escalated'].includes(task.status) && <>
           <button type="button" className={css.linkButton} disabled={saving} onClick={() => { void review(task.id, 'done') }}>{t('taskApprove')}</button>
           <button type="button" className={css.linkButton} disabled={saving} onClick={() => { setReviewing(task.id); setReason(''); setError(undefined) }}>{t('taskSendBack')}</button>
         </>}
       </div>
-      {terminating === task.id && <form onSubmit={event => { event.preventDefault(); void terminate(task.id) }}>
-        <label>{t('taskTerminateReason')}<input value={terminateReason} required onChange={event => { setTerminateReason(event.target.value) }} /></label>
-        <span className={css.taskMeta}>{t('taskTerminateHint')}</span>
-        <button type="submit" disabled={saving || !terminateReason.trim()}>{t('taskTerminateSubmit')}</button>
-        <button type="button" className={css.linkButton} onClick={() => { setTerminating(undefined); setTerminateReason('') }}>{t('cancel')}</button>
-      </form>}
       {reviewing === task.id && <form onSubmit={event => { event.preventDefault(); void review(task.id, 'rework') }}>
         <label>{t('taskReviewReason')}<input value={reason} required onChange={event => { setReason(event.target.value) }} /></label>
         <button type="submit" disabled={saving || !reason.trim()}>{t('taskReviewSubmit')}</button>
