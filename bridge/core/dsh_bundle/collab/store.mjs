@@ -510,7 +510,9 @@ export class Store {
     if (r === undefined || r.claim_bridge) return false;
     if (r.claim_task == null) return true;
     const handoff = this.db.prepare('SELECT status FROM tasks WHERE room_id = ? AND id > ? ORDER BY id LIMIT 1').get(roomId, r.claim_task);
-    return handoff !== undefined && (handoff.status === 'returned' || handoff.status === 'done');
+    // A cancelled or superseded handoff ends too: otherwise terminating the only task leaves the
+    // workspace claimed by a task nobody will ever finish.
+    return handoff !== undefined && ['returned', 'done', 'cancelled', 'superseded'].includes(handoff.status);
   }
 
   /**
