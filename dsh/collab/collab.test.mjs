@@ -6197,3 +6197,13 @@ test('a dispatcher cancels and supersedes a task, and the terminal state cannot 
   assert.equal(superseded.status, 'superseded');
   assert.throws(() => tasks.perform('cancel', { id: b.id, body: { reason: '再来一次' } }, { actor: 'zhu', verified: true }), /already/);
 });
+
+test('terminating the only task in a workspace releases it', () => {
+  const { hub, tasks, ws, assign } = g34Setup();
+  const t = assign();
+  tasks.q.setSource.run('workspace', t.id);
+  hub.store.claimWorkspace(1, ws.id, { handoff: t.id });
+  tasks.terminate(t.id, { actor: 'zhu', status: 'cancelled', reason: '不做了' });
+  assert.equal(tasks.task(t.id).status, 'cancelled');
+  assert.equal(hub.store.workspaceOwner(ws.id), null, 'the workspace goes back to the pool');
+});
