@@ -298,8 +298,10 @@ func (e *Engine) watchTurnEnded(p Platform, key, text string, worked, failed, ca
 	boardClosed := false
 	handedOff := false // the accepted work is in a workspace: its watch is the workspace's
 	chat := key
+	inWorkspace := false
 	if parent, ok := e.WorkspaceParent(key); ok {
 		chat = parent
+		inWorkspace = true
 	}
 	if e.team != nil {
 		items := placeTeamTaskBoard(e.teamTaskBoardPlacer(), readTeamTaskBoard(e.team.dir))
@@ -315,7 +317,11 @@ func (e *Engine) watchTurnEnded(p Platform, key, text string, worked, failed, ca
 			if boardID == it.ID && it.own != key && it.parent == key && !it.wsEnded {
 				handedOff = true
 			}
-			if it.own != key || it.wsEnded || watchBoardClosed(*it) ||
+			// A chat channel hands work to workspaces; an item that only sits on its board (handed
+			// back and awaiting review, or the lead's own note) is not work left running there.
+			// Only an explicit 【接】 is watched in a chat channel (#1167).
+			if !inWorkspace && !accepted ||
+				it.own != key || it.wsEnded || watchBoardClosed(*it) ||
 				it.Paused != "" && !(accepted && teamTaskBoardWaitUser.MatchString(it.PauseWhy)) {
 				continue
 			}

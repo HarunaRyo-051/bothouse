@@ -1,6 +1,8 @@
 package core
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -104,5 +106,49 @@ func TestWatchBoardClosedAnchored(t *testing.T) {
 		if got := watchBoardClosed(teamTaskBoardItem{Status: tc.status}); got != tc.closed {
 			t.Errorf("status %q: closed=%v, want %v", tc.status, got, tc.closed)
 		}
+	}
+}
+
+// #1167 (11-07): a lead's chat channel got 「接着做 #1162」 after every turn. #1162 was handed back
+// by its workspace and fell back to the chat, and the lead's own board note looked like running
+// work. Only an explicit 【接】 is watched in a chat channel; a workspace keeps its board watch.
+func TestWatchChatBoardItemsWithoutAcceptAreNotWatched(t *testing.T) {
+	e, p := idleWatchFixture(t)
+	dir := t.TempDir()
+	e.team = &teamState{dir: dir}
+	line := `{"id":1162,"what":"搏仓第二版","status":"已交回待验收","who":"` + e.name + `","sk":"discord:chatA","chat":"discord:chatA","ws_was":"discord:ws2"}`
+	line2 := `{"id":1167,"what":"桥 bug：主频道看门","status":"在做","who":"` + e.name + `","sk":"discord:chatA"}`
+	if err := os.WriteFile(filepath.Join(dir, teamTaskBoardFile), []byte(line+"\n"+line2+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, reply := range []string{"NO_REPLY", "看了一下，先这样", "接着做 #1162 的验收"} {
+		e.watchTurnEnded(p, "discord:chatA:u1", reply, true, false, false, time.Time{})
+		if got := idleWatchRows(t, e, "discord:chatA", true); len(got) != 0 {
+			t.Fatalf("%q: board items alone must not watch the chat channel, got %+v", reply, got)
+		}
+	}
+}
+
+// A workspace still arms its board-owned watch without an explicit 【接】.
+func TestWatchWorkspaceBoardItemWithoutAcceptIsWatched(t *testing.T) {
+	e, p := idleWatchFixture(t)
+	dir := t.TempDir()
+	e.team = &teamState{dir: dir}
+	teamWorkspaceStore.mu.Lock()
+	err := saveTeamWorkspacesLocked(teamWorkspacePath(e.dataDir), &teamWorkspaceState{Parents: map[string][]TeamWorkspace{
+		"discord:chat1": {{Name: "工作区1", ID: "ws1"}},
+	}, Version: teamWorkspaceStateVersion})
+	teamWorkspaceStore.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := `{"id":9,"what":"接上游的接口","status":"进行中","who":"` + e.name + `","ws":"discord:ws1","chat":"discord:chat1"}`
+	if err := os.WriteFile(filepath.Join(dir, teamTaskBoardFile), []byte(line+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e.watchTurnEnded(p, "discord:ws1:u1", "先读了交接，接下来改接口", true, false, false, time.Time{})
+	got := idleWatchRows(t, e, "discord:ws1", true)
+	if len(got) != 1 || got[0].Board != 9 {
+		t.Fatalf("a workspace's active board item must stay watched, got %+v", got)
 	}
 }
