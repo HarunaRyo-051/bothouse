@@ -1864,3 +1864,13 @@
   opacity: .7;
   margin-left: auto;
 }
+
+.dshc_headBusy {
+  background: var(--accent-soft, #e6f0fb);
+  color: var(--accent, #2b6cb0);
+  font-variant-numeric: tabular-nums;
+  border-radius: 999px;
+  margin-left: 6px;
+  padding: 0 6px;
+  font-size: 11px;
+}
