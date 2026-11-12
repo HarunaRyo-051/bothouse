@@ -174,3 +174,34 @@ func TestWatchStaleNumberlessWatchClosesAfterDue(t *testing.T) {
 		t.Fatal("a watch with no owner cannot be woken: it is stale once due")
 	}
 }
+
+// #1183 (11-07): a member accepted in the main chat, then handed back with 「【接】…」 on the first
+// line and 「[report] #1162 …」 on the next. The watch only read the first line, stayed open and
+// woke her ten hours later: a later [report]/【交回】 line ends it.
+func TestWatchLaterReportLineEndsWatch(t *testing.T) {
+	e, p := idleWatchFixture(t)
+	key := "discord:chatB"
+	at := time.Now()
+	idleWatchSeed(t, e, key, true, TeamHandoff{Chat: key, At: at, Due: at.Add(10 * time.Minute), Owner: e.name, Title: "看不出是哪件"})
+	text := "【接】\n[report] #1162 背景：已经交回\n要你做的：验收\n我加的：无"
+	e.watchTurnEnded(p, key+":u1", text, false, false, false, time.Time{})
+	rows := idleWatchRows(t, e, key, true)
+	if len(rows) != 1 || !rows[0].Idle.Returned {
+		t.Fatalf("a later [report] line must end the watch: %+v", rows)
+	}
+}
+
+func TestWatchHandbackLaterReadsOnlyLaterLines(t *testing.T) {
+	if watchHandbackLater("[report] 背景：无") {
+		t.Fatal("the first line is already a handback; that is not a later one")
+	}
+	if !watchHandbackLater("【接】\n@某人 [report] #7 背景：交回") {
+		t.Fatal("a later line with a mention and a report is a handback")
+	}
+	if !watchHandbackLater("【接】\n【交回】做完了") {
+		t.Fatal("a later 【交回】 line is a handback")
+	}
+	if watchHandbackLater("【接】\n做到一半，接着做") {
+		t.Fatal("a later line without the marker is not a handback")
+	}
+}

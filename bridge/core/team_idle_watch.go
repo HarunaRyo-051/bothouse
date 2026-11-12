@@ -268,6 +268,25 @@ func watchTitleNumber(title string) int {
 	return n
 }
 
+// watchHandbackLater: a reply whose first line is not the handback (「【接】…」, a mention) but a
+// later line opens with [report] or 【交回】 still handed the work back, as far as the watch is
+// concerned (#1183, 11-07: a member wrote 「【接】…」 then 「[report] #1162 …」 on the next line; the
+// watch stayed open and woke her ten hours later). The exit forwarding still wants the marker on
+// the first line; this only ends the watch.
+func watchHandbackLater(text string) bool {
+	_, rest, ok := strings.Cut(text, "\n")
+	if !ok {
+		return false
+	}
+	for _, line := range strings.Split(rest, "\n") {
+		line = strings.TrimSpace(watchLeadingMentions.ReplaceAllString(strings.TrimSpace(StripMarkdown(line)), ""))
+		if strings.HasPrefix(line, "[report]") || strings.HasPrefix(line, "【交回】") {
+			return true
+		}
+	}
+	return false
+}
+
 // watchStale: a script watch whose board item or owner cannot be told is closed once its due
 // time has passed, instead of being kept for a later wake (#1183, 11-07: a numberless watch from
 // 09:13 woke a member at 19:03). A watch that names a board item is judged by the board instead.
@@ -313,7 +332,7 @@ func (e *Engine) watchTurnEnded(p Platform, key, text string, worked, failed, ca
 	first, _, _ := strings.Cut(text, "\n")
 	accepted := strings.HasPrefix(strings.TrimSpace(first), "【接】")
 	// A stale waiting-user card cannot turn a fresh acceptance into a handback.
-	returned := cardResult && !accepted || watchIsHandback(text)
+	returned := cardResult && !accepted || watchIsHandback(text) || watchHandbackLater(text)
 	// A validated user question waits for the user's answer, not an idle wake.
 	asking := false
 	if kind, body, ok := parseExitKind(text); ok && kind == exitKindAsk {
