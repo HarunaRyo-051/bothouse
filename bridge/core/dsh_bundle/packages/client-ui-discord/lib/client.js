@@ -1,4 +1,4 @@
-// dsh-client-source-sha256: b0e73b3d37fae3d3d108e6a6726f90dffcd591c95fe2c62ef7035a2c81d08928
+// dsh-client-source-sha256: 7d85cc734bd9d95479cf2381b0ca287b8f89d64a382de5eea0a69ff4b56badcb
 // dsh-style-sha256: 6ddfda1aa899e8afde44c27f4f41cd6d3a0af8daacacaafea6dc12783684e9b4
 window.__ModuleLoader__.load({
  id: "@deepseek-ai/dsh-experimental-client-ui-discord",
@@ -19625,6 +19625,18 @@ function ChannelsPage({ useChannels, selectRoom, send, reviewTask, relocateTask,
 			document.removeEventListener("mousedown", onPress);
 		};
 	}, [avatarMenu]);
+	const readPosRef = (0, react.useRef)(/* @__PURE__ */ new Map());
+	(0, react.useEffect)(() => {
+		const log = logRef.current;
+		if (log === null || state.roomId === void 0) return;
+		const saved = readPosRef.current.get(state.roomId);
+		if (saved === void 0) {
+			log.scrollTop = log.scrollHeight;
+			return;
+		}
+		log.scrollTop = saved;
+		stickRef.current = log.scrollTop + log.clientHeight >= log.scrollHeight - 40;
+	}, [state.roomId]);
 	(0, react.useEffect)(() => {
 		const log = logRef.current;
 		if (log !== null && stickRef.current) log.scrollTop = log.scrollHeight;
@@ -20067,6 +20079,7 @@ function ChannelsPage({ useChannels, selectRoom, send, reviewTask, relocateTask,
 						onScroll: (event) => {
 							const el = event.currentTarget;
 							stickRef.current = el.scrollTop + el.clientHeight >= el.scrollHeight - 40;
+							if (state.roomId !== void 0) readPosRef.current.set(state.roomId, el.scrollTop);
 						},
 						children: [!visibleMembers.some((m) => m.kind !== "human") && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 							className: ChannelsPage_module_default.guide,

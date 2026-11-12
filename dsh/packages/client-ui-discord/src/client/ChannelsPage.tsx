@@ -395,6 +395,18 @@ export function ChannelsPage({ useChannels, selectRoom, send, reviewTask, reloca
     return () => { document.removeEventListener('mousedown', onPress) }
   }, [avatarMenu])
 
+  // Reading position per channel: leave and come back, you land where you were (at the bottom,
+  // new messages still follow).
+  const readPosRef = useRef(new Map<number, number>())
+  useEffect(() => {
+    const log = logRef.current
+    if (log === null || state.roomId === undefined) return
+    const saved = readPosRef.current.get(state.roomId)
+    if (saved === undefined) { log.scrollTop = log.scrollHeight; return }
+    log.scrollTop = saved
+    stickRef.current = log.scrollTop + log.clientHeight >= log.scrollHeight - 40
+  }, [state.roomId])
+
   // Follow new messages only while the reader is already at the bottom.
   useEffect(() => {
     const log = logRef.current
@@ -669,6 +681,7 @@ export function ChannelsPage({ useChannels, selectRoom, send, reviewTask, reloca
           onScroll={(event) => {
             const el = event.currentTarget
             stickRef.current = el.scrollTop + el.clientHeight >= el.scrollHeight - 40
+            if (state.roomId !== undefined) readPosRef.current.set(state.roomId, el.scrollTop)
           }}
         >
           {!visibleMembers.some(m => m.kind !== 'human') && (
