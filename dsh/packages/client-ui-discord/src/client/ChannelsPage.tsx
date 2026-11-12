@@ -15,6 +15,7 @@ import { AttachmentList, PendingAttachments, useComposerAttachments } from './At
 import { groupRooms } from './channel-source.ts'
 import { TaskBoard, TaskCard } from './TaskBoard.tsx'
 import { AskInbox } from './AskInbox.tsx'
+import { ProgressCard } from './ProgressCard.tsx'
 import { CapabilityList } from './CapabilityList.tsx'
 import { activeMention, applyMention, insertMention, rankMembers } from './mention-complete.ts'
 import { MemberDialog } from './MemberDialog.tsx'
@@ -658,6 +659,7 @@ export function ChannelsPage({ useChannels, selectRoom, send, reviewTask, reloca
           <button type="button" className={`${css.panelToggle} ${css.panelToggleEnd}`} title={t(membersHidden ? 'expandMembers' : 'collapseMembers')} aria-label={t(membersHidden ? 'expandMembers' : 'collapseMembers')} aria-expanded={!membersHidden} onClick={() => { setMembersHidden(!membersHidden) }}>{membersHidden ? '«' : '»'}</button>
           <button type="button" className={css.mobileButton} aria-label={t('showMembers')} aria-expanded={drawer === 'members'} onClick={() => setDrawer(drawer === 'members' ? undefined : 'members')}>{t('membersButton')}</button>
         </header>
+        <ProgressCard tasks={state.tasks ?? []} chatId={state.taskChat} t={t} onOpen={() => { setMembersHidden(false) }} />
         <div
           ref={logRef}
           className={css.log}

@@ -1830,3 +1830,37 @@
   max-width: 100%;
   overflow-x: auto;
 }
+
+.dshc_progressCard {
+  border: 0;
+  border-bottom: 1px solid var(--line, #e5e5e5);
+  background: var(--surface-2, #fafafa);
+  width: 100%;
+  color: var(--text-2, #555);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  font-size: 12px;
+  display: flex;
+}
+
+.dshc_progressCard:hover {
+  background: var(--surface-3, #f0f0f0);
+}
+
+.dshc_progressCard[data-working="true"] .dshc_progressTitle {
+  color: var(--accent, #2b6cb0);
+  font-weight: 600;
+}
+
+.dshc_progressTitle {
+  font-weight: 600;
+}
+
+.dshc_progressDone {
+  opacity: .7;
+  margin-left: auto;
+}
