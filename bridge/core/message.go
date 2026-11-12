@@ -392,6 +392,7 @@ type Message struct {
 	FromBot          bool // maomao fork: sent by a teammate bot; without Mentioned it is context only
 	AddressedOther   bool // the text @-s or names (at a line start) another team bot, not this one
 	Direct           bool // a private chat with the bot (DM); counts as calling it for the built-in busy rules
+	PrivateRoom      bool // a private room addresses the lead even without an explicit mention
 	// GroupChat marks a message from a shared multi-party chat (e.g. a QQ group). Core uses it
 	// with the structured UserName to label each speaker's own words, both in the prompt and in
 	// the gate's silent buffer, so attribution does not depend on AmbientChat being non-empty:
