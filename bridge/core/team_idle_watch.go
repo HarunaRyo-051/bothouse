@@ -250,6 +250,37 @@ func watchIsHandback(text string) bool {
 	return false
 }
 
+// watchTitleNumber: the board id a watch's title names, only when the title starts with it
+// ("#7 集中发布", the form the claim writes). A number inside a sentence is an issue or PR
+// number, not the item this watch works on.
+func watchTitleNumber(title string) int {
+	t := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(title), "【接】"))
+	if !strings.HasPrefix(t, "#") {
+		return 0
+	}
+	n := 0
+	for _, r := range t[1:] {
+		if r < '0' || r > '9' {
+			break
+		}
+		n = n*10 + int(r-'0')
+	}
+	return n
+}
+
+// watchStale: a script watch whose board item or owner cannot be told is closed once its due
+// time has passed, instead of being kept for a later wake (#1183, 11-07: a numberless watch from
+// 09:13 woke a member at 19:03). A watch that names a board item is judged by the board instead.
+func watchStale(h TeamHandoff, key string, now time.Time) bool {
+	if h.Due.IsZero() || !now.After(h.Due) {
+		return false
+	}
+	if strings.TrimSpace(h.Owner) == "" {
+		return true
+	}
+	return h.Board == 0 && watchTitleNumber(h.Title) == 0
+}
+
 var watchBoardClosedDone = regexp.MustCompile(`(?i)^done\b`)
 
 func watchBoardClosed(it teamTaskBoardItem) bool {
@@ -367,15 +398,28 @@ func (e *Engine) watchTurnEnded(p Platform, key, text string, worked, failed, ca
 		}
 	}
 	var assignments []idleAssignment
+	staleClosed := false
 	for _, script := range []bool{false, true} {
 		rows := st.Handoffs[key]
 		if script {
 			rows = st.ScriptWatches[key]
 		}
-		for _, h := range rows {
+		for i, h := range rows {
 			if teamHandoffOpen(h) && !h.Idle.Returned && !h.Due.IsZero() && e.watchOwns(p, h.Owner) {
+				if script && watchStale(h, key, time.Now()) {
+					if script {
+						st.ScriptWatches[key][i].Closed = time.Now()
+					}
+					staleClosed = true
+					continue
+				}
 				assignments = append(assignments, idleAssignment{key, h, script})
 			}
+		}
+	}
+	if staleClosed {
+		if err := saveTeamWorkspacesLocked(teamWorkspacePath(e.dataDir), st); err != nil {
+			slog.Error("idle watch: close stale watch failed", "workspace", key, "error", err)
 		}
 	}
 	// Direct acceptance and board-owned active work have no handoff/d10

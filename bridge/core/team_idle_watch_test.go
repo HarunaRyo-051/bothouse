@@ -51,7 +51,7 @@ func TestWatchBoardlessReportEndsWatch(t *testing.T) {
 		e, p := idleWatchFixture(t)
 		key := "discord:ws96"
 		at := time.Now().Add(-2 * time.Minute)
-		idleWatchSeed(t, e, key, script, TeamHandoff{Chat: key, At: at, Due: at.Add(time.Minute), Owner: e.name, Title: "no board"})
+		idleWatchSeed(t, e, key, script, TeamHandoff{Chat: key, At: at, Due: at.Add(time.Minute), Owner: e.name, Title: "no board", Board: 96})
 		e.watchTurnEnded(p, key+":u1", "[report] 背景：无任务号的交回\n要你做的：没有", false, false, false, time.Time{})
 		rows := idleWatchRows(t, e, key, script)
 		if len(rows) != 1 || !rows[0].Idle.Returned {
@@ -80,7 +80,7 @@ func TestWatchProgressDoesNotReviveReportedWatch(t *testing.T) {
 		if reported {
 			wakes = 2
 		}
-		idleWatchSeed(t, e, key, true, TeamHandoff{Chat: key, At: at, Due: at.Add(time.Minute), Owner: e.name, Idle: watchIdleState{Ended: at, Wakes: wakes, Reported: reported}})
+		idleWatchSeed(t, e, key, true, TeamHandoff{Chat: key, At: at, Due: at.Add(time.Minute), Owner: e.name, Board: 98, Idle: watchIdleState{Ended: at, Wakes: wakes, Reported: reported}})
 		e.watchTurnEnded(p, key+":u1", "继续做", true, false, false, time.Time{})
 		rows := idleWatchRows(t, e, key, true)
 		if len(rows) != 1 || rows[0].Idle.Reported != reported || (reported && rows[0].Idle.Wakes != 2) || (!reported && rows[0].Idle.Wakes != 0) {
@@ -150,5 +150,27 @@ func TestWatchWorkspaceBoardItemWithoutAcceptIsWatched(t *testing.T) {
 	got := idleWatchRows(t, e, "discord:ws1", true)
 	if len(got) != 1 || got[0].Board != 9 {
 		t.Fatalf("a workspace's active board item must stay watched, got %+v", got)
+	}
+}
+
+// #1183 (11-07): a numberless watch from 09:13 woke a member at 19:03. A script watch whose board
+// item or owner cannot be told is closed once its due time passed; one that names a board item is
+// judged by the board instead.
+func TestWatchStaleNumberlessWatchClosesAfterDue(t *testing.T) {
+	due := time.Now().Add(-time.Minute)
+	if !watchStale(TeamHandoff{Due: due, Owner: "橘", Title: "看不出是哪件"}, "discord:ws1", time.Now()) {
+		t.Fatal("a numberless watch past due must be stale")
+	}
+	if watchStale(TeamHandoff{Due: due, Owner: "橘", Board: 12}, "discord:ws1", time.Now()) {
+		t.Fatal("a watch with a board item is judged by the board")
+	}
+	if watchStale(TeamHandoff{Due: due, Owner: "橘", Title: "#12 集中发布"}, "discord:ws1", time.Now()) {
+		t.Fatal("a title naming the item is not numberless")
+	}
+	if watchStale(TeamHandoff{Due: time.Now().Add(time.Hour), Owner: "橘"}, "discord:ws1", time.Now()) {
+		t.Fatal("a watch that is not due yet is not stale")
+	}
+	if !watchStale(TeamHandoff{Due: due}, "discord:ws1", time.Now()) {
+		t.Fatal("a watch with no owner cannot be woken: it is stale once due")
 	}
 }
