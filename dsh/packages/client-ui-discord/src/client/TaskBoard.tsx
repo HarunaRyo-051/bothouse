@@ -22,7 +22,7 @@ function Status({ status, t }: { status: TaskStatus; t: T }) {
  * Right-column board for the selected chat channel.
  * @param onOpen - jump to a message in a room (dispatch or delivery).
  */
-export function TaskBoard({ tasks, rooms, chatId, roomId, t, onOpen, onReview, onRelocate }: {
+export function TaskBoard({ tasks, rooms, chatId, roomId, t, onOpen, onReview, onRelocate, onTerminate }: {
   tasks: readonly ChannelTask[]
   rooms: readonly ChannelRoom[]
   chatId: number | undefined
@@ -30,11 +30,16 @@ export function TaskBoard({ tasks, rooms, chatId, roomId, t, onOpen, onReview, o
   t: T
   onOpen: (roomId: number, messageId: number) => void
   onReview?: (id: number, verdict: 'done' | 'rework', note?: string) => Promise<void>
+  /** End a task without a review. Always asks for a reason first. */
+  onTerminate?: (id: number, reason: string) => Promise<void>
   onRelocate?: (id: number) => Promise<void>
 }) {
   const [opened, setOpened] = useState(false)
   const [selectedTab, setSelectedTab] = useState(BOARD_TABS.find(tab => tab.initial)!.id)
   const [reviewing, setReviewing] = useState<number>()
+  // Terminating is destructive, so it takes a reason and an explicit second click.
+  const [terminating, setTerminating] = useState<number>()
+  const [terminateReason, setTerminateReason] = useState('')
   const [reason, setReason] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string>()
@@ -64,6 +69,19 @@ export function TaskBoard({ tasks, rooms, chatId, roomId, t, onOpen, onReview, o
   const activeTab = BOARD_TABS.find(tab => tab.id === selectedTab)!
   const matches = (task: ChannelTask) => activeTab.statuses.length === 0 || activeTab.statuses.includes(task.status)
   const visibleCount = scopedTasks.filter(matches).length
+  const terminate = async (id: number) => {
+    setSaving(true)
+    setError(undefined)
+    try {
+      await onTerminate?.(id, terminateReason.trim())
+      setTerminating(undefined)
+      setTerminateReason('')
+    } catch (error) {
+      setError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setSaving(false)
+    }
+  }
   const review = async (id: number, verdict: 'done' | 'rework') => {
     setSaving(true)
     setError(undefined)
@@ -97,11 +115,19 @@ export function TaskBoard({ tasks, rooms, chatId, roomId, t, onOpen, onReview, o
             setSaving(true); setError(undefined)
             void onRelocate(task.id).catch(error => { setError(error instanceof Error ? error.message : String(error)) }).finally(() => { setSaving(false) })
           }}>{t('taskRelocate')}</button>}
+        {onTerminate !== undefined && !['done', 'cancelled', 'superseded'].includes(task.status)
+          && <button type="button" className={css.linkButton} disabled={saving} onClick={() => { setTerminating(task.id); setTerminateReason(''); setError(undefined) }}>{t('taskTerminate')}</button>}
         {onReview !== undefined && ['returned', 'declined', 'escalated'].includes(task.status) && <>
           <button type="button" className={css.linkButton} disabled={saving} onClick={() => { void review(task.id, 'done') }}>{t('taskApprove')}</button>
           <button type="button" className={css.linkButton} disabled={saving} onClick={() => { setReviewing(task.id); setReason(''); setError(undefined) }}>{t('taskSendBack')}</button>
         </>}
       </div>
+      {terminating === task.id && <form onSubmit={event => { event.preventDefault(); void terminate(task.id) }}>
+        <label>{t('taskTerminateReason')}<input value={terminateReason} required onChange={event => { setTerminateReason(event.target.value) }} /></label>
+        <span className={css.taskMeta}>{t('taskTerminateHint')}</span>
+        <button type="submit" disabled={saving || !terminateReason.trim()}>{t('taskTerminateSubmit')}</button>
+        <button type="button" className={css.linkButton} onClick={() => { setTerminating(undefined); setTerminateReason('') }}>{t('cancel')}</button>
+      </form>}
       {reviewing === task.id && <form onSubmit={event => { event.preventDefault(); void review(task.id, 'rework') }}>
         <label>{t('taskReviewReason')}<input value={reason} required onChange={event => { setReason(event.target.value) }} /></label>
         <button type="submit" disabled={saving || !reason.trim()}>{t('taskReviewSubmit')}</button>

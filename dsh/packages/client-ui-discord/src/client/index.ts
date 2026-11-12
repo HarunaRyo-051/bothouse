@@ -48,6 +48,7 @@ export function apply(ctx: ClientContext): void {
     send: channels.actions.send,
     reviewTask: channels.actions.reviewTask,
     relocateTask: channels.actions.relocateTask,
+    terminateTask: channels.actions.terminateTask,
     answerAsk: channels.actions.answerAsk,
     retrySend: channels.actions.retrySend,
     dismissSend: channels.actions.dismissSend,

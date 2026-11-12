@@ -303,6 +303,8 @@ export interface ChannelSnapshot {
 export interface ChannelActions {
   answerAsk(id: string, text: string): Promise<void>
   reviewTask(id: number, verdict: 'done' | 'rework', note?: string): Promise<void>
+  /** End a task without a review: the owner or the dispatcher, always with a reason. */
+  terminateTask(id: number, reason: string): Promise<void>
   relocateTask(id: number): Promise<void>
   /** Show another room and load its recent messages. */
   selectRoom(roomId: number): Promise<void>
@@ -850,6 +852,10 @@ export function createChannelSource(transport: ChannelTransport): {
     },
     async reviewTask(id, verdict, note) {
       const { task } = await request<{ task: ChannelTask }>(`collab/api/tasks/${id}/review`, json('POST', { verdict, note }))
+      set({ tasks: (snapshot.tasks ?? []).map(row => row.id === task.id ? task : row) })
+    },
+    async terminateTask(id, reason) {
+      const { task } = await request<{ task: ChannelTask }>(`collab/api/tasks/${id}/cancel`, json('POST', { reason }))
       set({ tasks: (snapshot.tasks ?? []).map(row => row.id === task.id ? task : row) })
     },
     async relocateTask(id) {

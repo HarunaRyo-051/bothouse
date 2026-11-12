@@ -1,4 +1,4 @@
-// dsh-client-source-sha256: 82ab5b670f65c489292868d5723b0da5955638720e9792a7a24cce2a55d66b18
+// dsh-client-source-sha256: ef394fb7899807135539bece7898ce3035d888852f4553bf366d94f5be2ff8d8
 // dsh-style-sha256: d12ba9753f77f197fda74b720711b36f8d5b21aa8ed7144c7eb066cb0dc639b5
 window.__ModuleLoader__.load({
  id: "@deepseek-ai/dsh-experimental-client-ui-discord",
@@ -621,6 +621,10 @@ function createChannelSource(transport) {
 					verdict,
 					note
 				}));
+				set({ tasks: (snapshot.tasks ?? []).map((row) => row.id === task.id ? task : row) });
+			},
+			async terminateTask(id, reason) {
+				const { task } = await request(`collab/api/tasks/${id}/cancel`, json("POST", { reason }));
 				set({ tasks: (snapshot.tasks ?? []).map((row) => row.id === task.id ? task : row) });
 			},
 			async relocateTask(id) {
@@ -17134,10 +17138,12 @@ function Status({ status, t }) {
 * Right-column board for the selected chat channel.
 * @param onOpen - jump to a message in a room (dispatch or delivery).
 */
-function TaskBoard({ tasks, rooms, chatId, roomId, t, onOpen, onReview, onRelocate }) {
+function TaskBoard({ tasks, rooms, chatId, roomId, t, onOpen, onReview, onRelocate, onTerminate }) {
 	const [opened, setOpened] = (0, react.useState)(false);
 	const [selectedTab, setSelectedTab] = (0, react.useState)(BOARD_TABS.find((tab) => tab.initial).id);
 	const [reviewing, setReviewing] = (0, react.useState)();
+	const [terminating, setTerminating] = (0, react.useState)();
+	const [terminateReason, setTerminateReason] = (0, react.useState)("");
 	const [reason, setReason] = (0, react.useState)("");
 	const [saving, setSaving] = (0, react.useState)(false);
 	const [error, setError] = (0, react.useState)();
@@ -17173,6 +17179,19 @@ function TaskBoard({ tasks, rooms, chatId, roomId, t, onOpen, onReview, onReloca
 	const activeTab = BOARD_TABS.find((tab) => tab.id === selectedTab);
 	const matches = (task) => activeTab.statuses.length === 0 || activeTab.statuses.includes(task.status);
 	const visibleCount = scopedTasks.filter(matches).length;
+	const terminate = async (id) => {
+		setSaving(true);
+		setError(void 0);
+		try {
+			await onTerminate?.(id, terminateReason.trim());
+			setTerminating(void 0);
+			setTerminateReason("");
+		} catch (error) {
+			setError(error instanceof Error ? error.message : String(error));
+		} finally {
+			setSaving(false);
+		}
+	};
 	const review = async (id, verdict) => {
 		setSaving(true);
 		setError(void 0);
@@ -17249,6 +17268,21 @@ function TaskBoard({ tasks, rooms, chatId, roomId, t, onOpen, onReview, onReloca
 						},
 						children: t("taskRelocate")
 					}),
+					onTerminate !== void 0 && ![
+						"done",
+						"cancelled",
+						"superseded"
+					].includes(task.status) && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						type: "button",
+						className: ChannelsPage_module_default.linkButton,
+						disabled: saving,
+						onClick: () => {
+							setTerminating(task.id);
+							setTerminateReason("");
+							setError(void 0);
+						},
+						children: t("taskTerminate")
+					}),
 					onReview !== void 0 && [
 						"returned",
 						"declined",
@@ -17272,6 +17306,39 @@ function TaskBoard({ tasks, rooms, chatId, roomId, t, onOpen, onReview, onReloca
 						},
 						children: t("taskSendBack")
 					})] })
+				]
+			}),
+			terminating === task.id && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("form", {
+				onSubmit: (event) => {
+					event.preventDefault();
+					terminate(task.id);
+				},
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", { children: [t("taskTerminateReason"), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+						value: terminateReason,
+						required: true,
+						onChange: (event) => {
+							setTerminateReason(event.target.value);
+						}
+					})] }),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: ChannelsPage_module_default.taskMeta,
+						children: t("taskTerminateHint")
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						type: "submit",
+						disabled: saving || !terminateReason.trim(),
+						children: t("taskTerminateSubmit")
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						type: "button",
+						className: ChannelsPage_module_default.linkButton,
+						onClick: () => {
+							setTerminating(void 0);
+							setTerminateReason("");
+						},
+						children: t("cancel")
+					})
 				]
 			}),
 			reviewing === task.id && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("form", {
@@ -19447,7 +19514,7 @@ function MemberGroup({ title, members, busy, onPick, onEdit, onRemove, t }) {
 * @param props - framework, injected, and locale shares.
 * @returns the three-column channel view.
 */
-function ChannelsPage({ useChannels, selectRoom, send, reviewTask, relocateTask, answerAsk, createRoom, renameRoom, listModels, listClis, listPersonas, addMember, updateMember, removeMember, setNoDispatch, getNoDispatch, replaceNoDispatch, setLead, setWorkspacePath, renewRoom, setDispatchMode, setMaxRelay, decidePermission, retryMessage, editMessage, withdrawMessage, openModelSettings, t }) {
+function ChannelsPage({ useChannels, selectRoom, send, reviewTask, relocateTask, terminateTask, answerAsk, createRoom, renameRoom, listModels, listClis, listPersonas, addMember, updateMember, removeMember, setNoDispatch, getNoDispatch, replaceNoDispatch, setLead, setWorkspacePath, renewRoom, setDispatchMode, setMaxRelay, decidePermission, retryMessage, editMessage, withdrawMessage, openModelSettings, t }) {
 	const state = useChannels((snapshot) => snapshot);
 	const [editing, setEditing] = (0, react.useState)(void 0);
 	const [ownNotice, setOwnNotice] = (0, react.useState)(void 0);
@@ -20264,7 +20331,8 @@ function ChannelsPage({ useChannels, selectRoom, send, reviewTask, relocateTask,
 						t,
 						onOpen: openMessage,
 						onReview: reviewTask,
-						onRelocate: relocateTask
+						onRelocate: relocateTask,
+						onTerminate: terminateTask
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
 						type: "button",
@@ -20457,6 +20525,10 @@ const zh = {
 	taskApprove: "验收通过",
 	taskSendBack: "要求返工",
 	taskRelocate: "迁入空工位继续",
+	taskTerminate: "终止任务",
+	taskTerminateReason: "终止原因",
+	taskTerminateSubmit: "确认终止",
+	taskTerminateHint: "终止后任务不再计时、不再催办，工作区也会释放；派活人仍能看到记录。",
 	taskReviewReason: "返工原因（必填）",
 	taskReviewSubmit: "提交返工",
 	dispatchMode: "派活方式",
@@ -20655,6 +20727,10 @@ const en = {
 	taskApprove: "Accept result",
 	taskSendBack: "Request rework",
 	taskRelocate: "Move to free workspace",
+	taskTerminate: "Terminate task",
+	taskTerminateReason: "Reason",
+	taskTerminateSubmit: "Confirm terminate",
+	taskTerminateHint: "The task stops being watched and its workspace is released; the dispatcher keeps the record.",
 	taskReviewReason: "Reason for rework (required)",
 	taskReviewSubmit: "Submit rework",
 	lead: "Primary role",
@@ -20847,6 +20923,7 @@ function apply(ctx) {
 		send: channels.actions.send,
 		reviewTask: channels.actions.reviewTask,
 		relocateTask: channels.actions.relocateTask,
+		terminateTask: channels.actions.terminateTask,
 		answerAsk: channels.actions.answerAsk,
 		retrySend: channels.actions.retrySend,
 		dismissSend: channels.actions.dismissSend,
