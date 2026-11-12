@@ -1874,3 +1874,31 @@
   padding: 0 6px;
   font-size: 11px;
 }
+
+.dshc_briefWrap {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  display: flex;
+}
+
+.dshc_briefHead {
+  opacity: .85;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.dshc_briefChips {
+  flex-wrap: wrap;
+  gap: 4px;
+  display: inline-flex;
+}
+
+.dshc_briefChip {
+  background: var(--surface-3, #f0f0f0);
+  white-space: nowrap;
+  border-radius: 999px;
+  padding: 0 8px;
+  font-size: 11px;
+  line-height: 18px;
+}

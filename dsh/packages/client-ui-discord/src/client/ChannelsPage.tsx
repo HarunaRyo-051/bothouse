@@ -73,6 +73,19 @@ function Quote({ quote, t }: { quote: ChannelQuote; t: T }) {
  * Discord card switch (bridge/platform/discord/card_view.go,
  * card_view_pref.go), default 简略 as there (cardViewDefault).
  */
+/** A progress brief: 「第 3 步 · 1分15秒」 on top, then one chip per tool and its state. */
+function BriefChips({ brief }: { brief: string }) {
+  const lines = brief.split('\n').map(line => line.trim()).filter(Boolean)
+  if (lines.length === 0) return null
+  const [head, ...chips] = lines
+  return (
+    <div className={css.briefWrap}>
+      <span className={css.briefHead}>{head}</span>
+      {chips.length > 0 && <span className={css.briefChips}>{chips.map((line, index) => <span key={index} className={css.briefChip}>{line}</span>)}</span>}
+    </div>
+  )
+}
+
 export type CardView = 'detail' | 'brief'
 const CARD_VIEW_DEFAULT: CardView = 'brief'
 const CARD_VIEW_KEY = 'dsh-channels-card-view:'
@@ -125,7 +138,8 @@ function MessageRow({ message, member, t, onConfigure, menuOpen, onAvatar, onClo
     try { card = JSON.parse(message.card) as { title?: string; state?: string; action?: string; kind?: string; task_id?: number; brief?: string } } catch (error) { void error /* unreadable card metadata: render the text alone */ }
   }
   // Parse once per text change: MessageRow re-renders on every composer keystroke.
-  const shown = typeof card?.brief === 'string' && cardView === 'brief' ? card.brief : message.text
+  const briefOnly = typeof card?.brief === 'string' && cardView === 'brief'
+  const shown = briefOnly ? card.brief as string : message.text
   const markdown = useMemo(() => softBreaksToHard(shown), [shown])
   const classes = [css.message, message.author_kind === 'system' ? css.system : '', focused ? css.focused : ''].filter(Boolean).join(' ')
   // A task opened from this message (an @ dispatch, a handoff) shows its card here: the server posts
@@ -205,7 +219,7 @@ function MessageRow({ message, member, t, onConfigure, menuOpen, onAvatar, onClo
                     </div>
                   )}
                 </div>
-                <div className={css.text}><MarkdownText text={markdown} labels={labels} /></div>
+                {briefOnly ? <BriefChips brief={shown} /> : <div className={css.text}><MarkdownText text={markdown} labels={labels} /></div>}
                 {(card.state === 'failed' || card.action === 'configure-model') && (
                   <div className={css.cardButtons}>
                     {card.state !== 'retried' && (

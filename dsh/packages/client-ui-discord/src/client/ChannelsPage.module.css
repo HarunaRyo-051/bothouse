@@ -1624,3 +1624,16 @@
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
+
+/* Progress brief as chips: a step header line, then one chip per tool and its state. */
+.briefWrap { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.briefHead { font-weight: 600; font-size: 12px; opacity: 0.85; }
+.briefChips { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.briefChip {
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--surface-3, #f0f0f0);
+  font-size: 11px;
+  line-height: 18px;
+  white-space: nowrap;
+}
