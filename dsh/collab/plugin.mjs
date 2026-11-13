@@ -6,9 +6,9 @@ import { personaLibrary } from './personas.mjs';
 //         name: /abs/path/dsh/collab/plugin.mjs
 //         config: { dataDir, workspacePath, leadFile?, fallbackLead?, botTokenEnv?, ownerName?, rooms?, dshMembers?, maxRelay? }
 import { createRequire } from 'node:module';
-import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { readFileSync, realpathSync, statSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
 import { Store, CollabError, publicMessage } from './store.mjs';
 import { Hub } from './hub.mjs';
 import { TeamExit } from './team-exit.mjs';
@@ -79,11 +79,8 @@ export function resolveConfig(config, env = process.env) {
   const leadFile = c.leadFile ?? join(env.BOTHOUSE_DATA_DIR ?? join(env.HOME ?? '.', '.bothouse'), 'lead.json');
   if (!isAbsolute(leadFile)) throw Error('conest-collab: leadFile must be an absolute path');
   const fallbackLead = String(c.fallbackLead ?? env.CONEST_FALLBACK_LEAD ?? '').trim();
-  // Wiki 星河 reads a markdown wiki: config → env → this repository's wiki/ → ~/wiki.
-  // The repo copy wins so a checkout carries its own wiki; the home one stays the develop default.
-  const repoWiki = fileURLToPath(new URL('../../wiki', import.meta.url));
-  const wikiDir = String(c.wikiDir ?? env.CONEST_WIKI_DIR ?? '').trim()
-    || (existsSync(repoWiki) ? repoWiki : env.HOME ? join(env.HOME, 'wiki') : undefined);
+  // Wiki 星河 reads a markdown wiki; same resolution as develop: config → env → ~/wiki.
+  const wikiDir = String(c.wikiDir ?? env.CONEST_WIKI_DIR ?? '').trim() || (env.HOME ? join(env.HOME, 'wiki') : undefined);
   if (wikiDir !== undefined && !isAbsolute(wikiDir)) throw Error('conest-collab: wikiDir must be an absolute path');
   return { dataDir: c.dataDir, workspacePath: c.workspacePath, leadFile, fallbackLead, rooms, dshMembers: members, maxRelay, botTokenEnv, botToken, wikiDir, ownerName: c.ownerName ?? '我' };
 }
