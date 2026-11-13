@@ -6293,6 +6293,9 @@ test('wiki galaxy: pages become stars, links become lines, and only .md in the r
   const res = { writeHead() {}, end(chunk) { body = String(chunk); } };
   assert.equal(wikiGalaxyRoute({ method: 'GET', headers: {} }, res, url, { wikiDir: dir }), true);
   assert.equal(JSON.parse(body).nodes.length, 3);
+  // The page itself is a shipped asset: a missing one is a blank panel, so it must be there.
+  assert.equal(wikiGalaxyRoute({ method: 'GET', headers: {} }, res, new URL('http://x/collab/wiki-galaxy'), { wikiDir: dir }), true);
+  assert.match(body, /<canvas|<svg/, 'the page draws the galaxy');
   // A request for anything else is not this route.
   assert.equal(wikiGalaxyRoute({ method: 'GET', headers: {} }, res, new URL('http://x/other'), { wikiDir: dir }), undefined);
 });
