@@ -369,7 +369,7 @@ export class DshMembers {
     this.gateContext = runtime.gateContext ?? new GateContext({ logger: runtime.logger });
     /** The member's own MEMORY.md on the first turn of each conversation (bridge memory_index). */
     this.memoryIndex = runtime.memoryIndex ?? new MemoryIndex();
-    this.memoryForum = runtime.memoryForum ?? new MemoryForum();
+    this.memoryForum = runtime.memoryForum ?? new MemoryForum({ dataDir: runtime.dataDir, logger: runtime.logger });
     for (const m of members) this.publish(m);
     hub.onPlan(message => this.plan(message));
   }
@@ -756,17 +756,27 @@ export class DshMembers {
     };
   }
 
-  /** Record which memory pages a reply said it used, and let a hand-back leave one behind. */
+  /**
+   * Record which memory pages a reply said it used, and let a hand-back leave one behind.
+   * The message event goes out again with the badge data: the first one was emitted before this ran,
+   * so a live channel would otherwise show no badge until the page was reloaded.
+   */
   noteMemoryUse(member, room, message) {
     const text = message?.text ?? '';
     const cited = this.memoryForum.cited(member.id, room.id, text);
-    for (const entry of cited) this.store.recordMemoryUse(message.id, { member: member.id, room: room.id, entry: entry.id, name: entry.name });
+    if (cited.length > 0) {
+      for (const entry of cited) this.store.recordMemoryUse(message.id, { member: member.id, room: room.id, entry: entry.id, name: entry.name });
+      const row = this.store.message(message.id);
+      if (row !== undefined) this.hub.emit({ type: 'message', message: publicMessage(row, this.store) });
+    }
     // A hand-back is the one moment a member knows something worth keeping: write it as a page.
     const mark = exitMark(text, { lastLine: true });
     if (mark?.kind !== 'report') return;
-    const learned = /做了什么[ 	　]*[：:][ 	　]*(.+)/.exec(mark.body)?.[1]?.trim();
+    // Anchored at a line start: a 「做了什么：」 inside another part is not the summary.
+    const learned = /^做了什么[ \t　]*[：:][ \t　]*(.+)$/m.exec(mark.body)?.[1]?.trim();
     if (!learned) return;
-    this.memoryForum.write(member.id, { name: learned.slice(0, 40), description: `#${member.name} 在「${room.name}」交回时记下` });
+    // The whole sentence is the page; the name is only its opening.
+    this.memoryForum.write(member.id, { name: learned, description: learned });
   }
 
   /** A released workspace starts over: drop each local CLI member's ACP session for roomId. */

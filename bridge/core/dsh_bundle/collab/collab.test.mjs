@@ -6328,3 +6328,49 @@ test('记忆论坛 rework: strict hand-back line, full text kept, unrelated page
   assert.equal(written.description.length, Math.min(long.length, 160));
   assert.match(readFileSync(join(dir, 'roles', 'ds', 'wiki', 'memory', '徽标修复.md'), 'utf8'), /尾巴不能被截掉/);
 });
+
+test('记忆论坛 调用链: noteMemoryUse 记账后重发消息，且只按行首「做了什么」写页', async () => {
+  const { mkdtempSync, existsSync, readFileSync, readdirSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { DshMembers } = await import('./dsh-member.mjs');
+  const { MemoryForum } = await import('./memory-forum.mjs');
+  const { mkdirSync, writeFileSync } = await import('node:fs');
+  const dir = mkdtempSync(join(tmpdir(), 'mem3-'));
+  mkdirSync(join(dir, 'roles', 'ds', 'wiki', 'memory'), { recursive: true });
+  writeFileSync(join(dir, 'roles', 'ds', 'wiki', 'memory', 'deploy.md'), '---\nname: 上线检查\ndescription: 发版看 CI\n---\n');
+
+  const forum = new MemoryForum({ dataDir: dir });
+  forum.remember('ds', 1, forum.entries('ds'));
+  const posted = { id: 9, room_id: 1, text: '[report] #3 背景：x\n做了什么：按 [#deploy] 补上徽标\n要你用的：无\n我加的：无', author: 'ds' };
+  const recorded = [];
+  const emitted = [];
+  const room = { id: 1, name: 'general' };
+  // 只取真实方法，不构造整个成员系统：这样测的是调用链本身。
+  const subject = Object.create(DshMembers.prototype);
+  subject.store = {
+    recordMemoryUse: (id, use) => recorded.push([id, use.entry]),
+    message: () => posted,
+    quote: () => undefined,
+    memoryUses: () => recorded.map(([, entry]) => ({ entry, name: entry })),
+  };
+  subject.hub = { emit: event => emitted.push(event) };
+  subject.memoryForum = forum;
+
+  subject.noteMemoryUse({ id: 'ds', name: 'DS' }, room, posted);
+  assert.deepEqual(recorded, [[9, 'deploy']], '引用要记账');
+  assert.equal(emitted.length, 1, '记账后要重发消息事件');
+  assert.ok(Array.isArray(emitted[0].message.memory), '事件里要带 memory');
+
+  // 交回写页：只认行首的「做了什么」，且保存完整正文
+  const notMine = { id: 10, room_id: 1, text: '[report] #4 背景：x\n要你做的：请阅读示例 做了什么：误收内容\n我加的：无', author: 'ds' };
+  subject.noteMemoryUse({ id: 'ds', name: 'DS' }, room, notMine);
+  assert.equal(existsSync(join(dir, 'roles', 'ds', 'wiki', 'memory', '误收内容.md')), false, '别处出现的「做了什么」不算');
+
+  const long = '把徽标补上，并且把完整结论保留下来，尾巴不能被截掉';
+  const report = { id: 11, room_id: 1, text: `[report] #5 背景：x\n做了什么：${long}\n要你用的：无\n我加的：无`, author: 'ds' };
+  subject.noteMemoryUse({ id: 'ds', name: 'DS' }, room, report);
+  const files = readdirSync(join(dir, 'roles', 'ds', 'wiki', 'memory'));
+  const written = files.find(name => name.startsWith('把徽标补上'));
+  assert.ok(written, `应写出一页，实际: ${files.join(',')}`);
+  assert.match(readFileSync(join(dir, 'roles', 'ds', 'wiki', 'memory', written), 'utf8'), /尾巴不能被截掉/, '完整正文要保留');
+});
