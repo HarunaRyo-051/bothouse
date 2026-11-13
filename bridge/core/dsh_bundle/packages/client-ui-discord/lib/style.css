@@ -1902,3 +1902,46 @@
   font-size: 11px;
   line-height: 18px;
 }
+
+.dshc_deliveryCard {
+  border: 1px solid var(--line, #e5e5e5);
+  border-radius: 8px;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+  display: flex;
+  overflow: hidden;
+}
+
+.dshc_deliveryBar {
+  background: var(--surface-2, #fafafa);
+  align-items: center;
+  gap: 10px;
+  padding: 4px 8px;
+  font-size: 12px;
+  display: flex;
+}
+
+.dshc_deliveryName {
+  font-weight: 600;
+}
+
+.dshc_deliveryFrame {
+  background: #fff;
+  border: 0;
+  width: 100%;
+  height: 320px;
+}
+
+.dshc_deliveryFrameFull {
+  background: #fff;
+  border: 0;
+  width: 100%;
+  height: 70vh;
+}
+
+.dshc_deliveryReview {
+  gap: 8px;
+  margin-top: 6px;
+  display: flex;
+}

@@ -113,11 +113,12 @@ interface OwnActions {
 }
 
 
-function MessageRow({ message, member, t, onConfigure, menuOpen, onAvatar, onCloseMenu, onMention, onDecide, onReply, onRetry, retrying, tasks, focused, cardView, onCardView, own }: {
+function MessageRow({ message, member, t, onConfigure, menuOpen, onAvatar, onCloseMenu, onMention, onDecide, onReply, onRetry, retrying, tasks, focused, cardView, onCardView, own, onReview }: {
   message: ChannelMessage
   cardView: CardView
   onCardView: (view: CardView) => void
   own: OwnActions | undefined
+  onReview?: (id: number, verdict: 'done' | 'rework', note?: string) => Promise<void>
   tasks: readonly ChannelTask[]
   focused: boolean
   member: ChannelMember | undefined
@@ -145,6 +146,9 @@ function MessageRow({ message, member, t, onConfigure, menuOpen, onAvatar, onClo
   // A task opened from this message (an @ dispatch, a handoff) shows its card here: the server posts
   // no 派活 record beside it (dsh/collab/tasks.mjs assign). A task record carries its own card, and a
   // sub-task anchored here too is a row of its parent's card.
+  // A delivery awaiting review can be reviewed right here, next to the work itself.
+  const delivered = tasks.find(task => task.result_msg_id === message.id
+    && ['returned', 'declined', 'escalated'].includes(task.status))
   const anchored = card?.kind === 'task' ? [] : tasks.filter(task => task.assign_msg_id === message.id)
   const anchoredIds = new Set(anchored.map(task => task.id))
   const taskCards = anchored.filter(task => task.parent_task === null || !anchoredIds.has(task.parent_task))
@@ -203,7 +207,17 @@ function MessageRow({ message, member, t, onConfigure, menuOpen, onAvatar, onClo
               </div>
             )
           : card === undefined
-          ? <>{message.text !== '' && <div className={css.text}><MarkdownText text={markdown} labels={labels} /></div>}<AttachmentList attachments={message.attachments} t={t} /></>
+          ? <>{message.text !== '' && <div className={css.text}><MarkdownText text={markdown} labels={labels} /></div>}<AttachmentList attachments={message.attachments} t={t} />
+              {delivered !== undefined && onReview !== undefined && (
+                <div className={css.deliveryReview}>
+                  <button type="button" className={css.linkButton} onClick={() => { void onReview(delivered.id, 'done') }}>{t('deliveryAccept')}</button>
+                  <button type="button" className={css.linkButton} onClick={() => {
+                    const note = window.prompt(t('deliveryReworkAsk'))
+                    if (note !== null && note.trim() !== '') void onReview(delivered.id, 'rework', note.trim())
+                  }}>{t('deliveryRework')}</button>
+                </div>
+              )}</>
+
           : (
               <div className={css.card} data-state={card.state}>
                 <div className={css.cardHead}>
@@ -725,6 +739,7 @@ export function ChannelsPage({ useChannels, selectRoom, send, reviewTask, reloca
                   tasks={state.tasks ?? []}
                   focused={focusedId === m.id}
                   onReply={startReply}
+                  onReview={reviewTask}
                   own={ownActions(m)}
                 />
               ))}

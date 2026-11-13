@@ -6207,3 +6207,17 @@ test('terminating the only task in a workspace releases it', () => {
   assert.equal(tasks.task(t.id).status, 'cancelled');
   assert.equal(hub.store.workspaceOwner(ws.id), null, 'the workspace goes back to the pool');
 });
+
+test('a delivered page renders in place with a sandbox CSP; a download stays a download', async () => {
+  const { pageViewHeaders, HTML_PAGE } = await import('./plugin.mjs');
+  const page = pageViewHeaders('text/html; charset=utf-8');
+  assert.ok(page, 'an html attachment gets the in-place headers');
+  assert.match(page['content-security-policy'], /^sandbox /, 'sandboxed, never with allow-same-origin');
+  assert.doesNotMatch(page['content-security-policy'], /allow-same-origin/);
+  assert.equal(page['content-disposition'], undefined, 'no download prompt for an in-place page');
+  // Anything scriptable that is not plain HTML stays a download (svg scripts run in the app origin).
+  for (const mime of ['image/svg+xml', 'application/xhtml+xml', 'text/plain', 'image/png']) {
+    assert.equal(pageViewHeaders(mime), undefined, mime);
+  }
+  assert.equal(HTML_PAGE.test('text/html'), true);
+});

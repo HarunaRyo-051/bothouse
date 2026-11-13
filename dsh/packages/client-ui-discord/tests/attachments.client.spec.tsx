@@ -112,3 +112,12 @@ it('leaves audio and file attachments without image action buttons', () => {
   expect(screen.queryByRole('link', { name: downloadLabel })).toBeNull()
   expect(screen.getAllByRole('link')).toHaveLength(2)
 })
+
+it('renders a delivered page in a sandboxed frame, never with allow-same-origin', () => {
+  const page = { id: 'abc', name: 'report.html', mime: 'text/html', size: 10 }
+  const { container } = render(<AttachmentList attachments={[page]} t={t as never} />)
+  const frame = container.querySelector('iframe')
+  expect(frame).not.toBeNull()
+  expect(frame?.getAttribute('src')).toContain('view=page')
+  expect(frame?.getAttribute('sandbox')).not.toContain('allow-same-origin')
+})

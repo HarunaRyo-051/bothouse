@@ -241,6 +241,14 @@ export async function apply(ctx, rawConfig) {
       const row = store.attachmentMeta(att[1]);
       const bytes = row === undefined ? undefined : files.read(att[1]);
       if (bytes === undefined) return json(res, 404, { error: 'attachment not found' });
+      // ?view=page: a delivered web page is rendered in place instead of downloaded. It is served
+      // with a sandbox CSP so the page cannot touch the app's origin, and only for email-safe text
+      // types — never as generic HTML with access to cookies.
+      const pageHeaders = url.searchParams.get('view') === 'page' ? pageViewHeaders(row.mime) : undefined;
+      if (pageHeaders !== undefined) {
+        res.writeHead(200, pageHeaders);
+        return res.end(bytes);
+      }
       return sendAttachment(req, res, row, bytes);
     }
     const uploaded = /^\/collab\/avatars\/uploads\/([a-z0-9-]+\.png)$/.exec(path);
@@ -677,6 +685,21 @@ export function parseRange(header, size) {
 }
 
 /** Serves a stored attachment; honours single byte ranges so iOS Safari can play audio. */
+/** Mime types a delivery card may render in place: HTML only, never SVG or XML (scriptable). */
+export const HTML_PAGE = /^text\/html(;|$)/i;
+
+/**
+ * Headers for an attachment rendered in place (?view=page). Undefined when the type is not a page:
+ * the caller then falls back to a normal download. The CSP sandbox is what keeps a delivered page
+ * away from the app's origin.
+ */
+export function pageViewHeaders(mime) {
+  if (!HTML_PAGE.test(String(mime ?? ''))) return undefined;
+  return { 'content-type': mime, 'x-content-type-options': 'nosniff',
+    'content-security-policy': "sandbox allow-scripts allow-forms allow-popups allow-modals; default-src 'self' data: blob: 'unsafe-inline'",
+    'cache-control': 'private, max-age=86400' };
+}
+
 export function sendAttachment(req, res, row, bytes) {
   const headers = { 'content-type': row.mime, 'accept-ranges': 'bytes',
     'content-disposition': `${INLINE_IMAGE.test(row.mime) ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(row.name)}`,

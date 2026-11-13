@@ -10,6 +10,8 @@ import css from './ChannelsPage.module.css'
 
 const isImage = (mime: string): boolean => /^image\/(png|jpeg|gif|webp)$/.test(mime)
 const isAudio = (mime: string): boolean => mime.startsWith('audio/')
+/** A delivered page: rendered in place in a sandboxed frame, never downloaded to look at it. */
+const isPage = (mime: string): boolean => /^text\/html(;|$)/i.test(mime)
 
 const size = (bytes: number): string =>
   bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`
@@ -98,11 +100,35 @@ function ImageAttachment({ attachment: a, t }: { readonly attachment: ChannelAtt
 }
 
 /** Thumbnails for images, a download card for other files. */
+function PageAttachment({ attachment: a, t }: { readonly attachment: ChannelAttachment; readonly t: T }) {
+  const src = `${attachmentUrl(a.id)}?view=page`
+  const [full, setFull] = useState(false)
+  return (
+    <div className={css.deliveryCard}>
+      <div className={css.deliveryBar}>
+        <span className={css.deliveryName}>📄 {a.name}</span>
+        <button type="button" className={css.linkButton} onClick={() => { setFull(!full) }}>{t(full ? 'deliveryShrink' : 'deliveryFull')}</button>
+        <a className={css.linkButton} href={src} target="_blank" rel="noreferrer">{t('deliveryNewTab')}</a>
+      </div>
+      <iframe
+        className={full ? css.deliveryFrameFull : css.deliveryFrame}
+        src={src}
+        title={a.name}
+        sandbox="allow-scripts allow-forms allow-popups allow-modals"
+        referrerPolicy="no-referrer"
+        loading="lazy"
+      />
+    </div>
+  )
+}
+
 export function AttachmentList({ attachments, t }: { readonly attachments?: readonly ChannelAttachment[]; readonly t: T }) {
   if (attachments === undefined || attachments.length === 0) return null
   return (
     <div className={css.attachments}>
-      {attachments.map(a => isImage(a.mime)
+      {attachments.map(a => isPage(a.mime)
+        ? <PageAttachment key={a.id} attachment={a} t={t} />
+        : isImage(a.mime)
         ? <ImageAttachment key={a.id} attachment={a} t={t} />
         : isAudio(a.mime)
           ? (

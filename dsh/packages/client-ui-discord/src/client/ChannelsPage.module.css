@@ -1637,3 +1637,13 @@
   line-height: 18px;
   white-space: nowrap;
 }
+
+/* Delivery card: a delivered web page rendered in place, with full-size and new-tab actions. */
+.deliveryCard { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; border: 1px solid var(--line, #e5e5e5); border-radius: 8px; overflow: hidden; }
+.deliveryBar { display: flex; gap: 10px; align-items: center; padding: 4px 8px; background: var(--surface-2, #fafafa); font-size: 12px; }
+.deliveryName { font-weight: 600; }
+.deliveryFrame { width: 100%; height: 320px; border: 0; background: #fff; }
+.deliveryFrameFull { width: 100%; height: 70vh; border: 0; background: #fff; }
+
+/* Accept or send back a delivery right beside it, without opening the board. */
+.deliveryReview { display: flex; gap: 8px; margin-top: 6px; }
