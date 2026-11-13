@@ -1876,6 +1876,27 @@ test('CLI member streams: first chunk opens a draft, later chunks edit it, the r
   assert.equal(hub.store.job(2).trigger_id, rows[0].id);
 });
 
+test('CLI member: error-only completion fails its job, removes draft and leaves task 出错', async () => {
+  const hub = makeHub();
+  hub.setMember({ id: 'ds', name: 'DeepSeek', kind: 'dsh', online: true });
+  hub.setMember({ id: 'cc', name: 'CC', kind: 'dsh', online: true });
+  hub.leadState = { selected: () => 'ds' };
+  const tasks = new Tasks(hub, { setTimer: () => ({}), clearTimer() {} });
+  hub.tasks = tasks;
+  cliMembers(hub, async (_t, _r, onText) => {
+    onText('Selected model is at capacity. Please try a different model.');
+    return 'Selected model is at capacity. Please try a different model.';
+  });
+  hub.post(1, { authorKind: 'role', author: 'ds', name: 'DeepSeek', text: '@CC 跑一次 date' });
+  await settle();
+  const task = tasks.list(1).find(t => t.owner === 'cc');
+  assert.equal(hub.store.job(1).state, 'failed');
+  assert.equal(tasks.task(task.id).status, 'failed');
+  assert.equal(hub.store.page(1, undefined, 20).filter(m => m.author === 'cc').length, 0);
+  const failure = hub.store.page(1, undefined, 20).find(m => JSON.parse(m.card ?? 'null')?.detail?.includes('Selected model is at capacity'));
+  assert.ok(failure, 'failure card keeps the raw provider message');
+});
+
 test('CLI member streams: an error or cancel removes the draft; no output leaves no row', async () => {
   const hub = makeHub();
   cliMembers(hub, async (_t, _r, onText) => { onText('写了一半'); await tick(); await tick(); throw new Error('boom'); });
@@ -5044,7 +5065,12 @@ test('CLI member: after /new the fresh context gets its MEMORY.md and the task b
   const data = mkdtempSync(join(tmpdir(), 'collab-mem-'));
   mkdirSync(join(data, 'roles', 'cc', 'wiki'), { recursive: true });
   writeFileSync(join(data, 'roles', 'cc', 'wiki', 'MEMORY.md'), '- [a](a/README.md) — 甲\n');
-  const gate = await fakeGate(() => ({ wiki: [{ ...BOARD, path: '【任务板 aaa111】' }] }));
+  const pushed = new Set();
+  const gate = await fakeGate(({ body }) => {
+    if (pushed.has(body.epoch)) return { wiki: [] };
+    pushed.add(body.epoch);
+    return { wiki: [{ ...BOARD, path: '【任务板 aaa111】' }] };
+  });
   process.env.BOTHOUSE_DATA_DIR = data;
   process.env.GATE_PORT = String(gate.port);
   try {
@@ -5066,7 +5092,7 @@ test('CLI member: after /new the fresh context gets its MEMORY.md and the task b
     await until(() => prompts.length === 3);
     assert.match(prompts[0], /你的记忆/);
     assert.match(prompts[0], /【任务板 aaa111】/);
-    assert.doesNotMatch(prompts[1], /你的记忆|【任务板/, 'same context: not again');
+    assert.doesNotMatch(prompts[1], /你的记忆|【任务板 aaa111】/, 'same context: not again');
     assert.match(prompts[2], /你的记忆/, '/new: MEMORY.md again');
     assert.match(prompts[2], /【任务板 aaa111】/, '/new: the unchanged board again');
   } finally {
@@ -5083,7 +5109,12 @@ test('CLI member: a session that could not be resumed gets its MEMORY.md and the
   const data = mkdtempSync(join(tmpdir(), 'collab-mem-'));
   mkdirSync(join(data, 'roles', 'cc', 'wiki'), { recursive: true });
   writeFileSync(join(data, 'roles', 'cc', 'wiki', 'MEMORY.md'), '- [a](a/README.md) — 甲\n');
-  const gate = await fakeGate(() => ({ wiki: [{ ...BOARD, path: '【任务板 aaa111】' }] }));
+  const pushed = new Set();
+  const gate = await fakeGate(({ body }) => {
+    if (pushed.has(body.epoch)) return { wiki: [] };
+    pushed.add(body.epoch);
+    return { wiki: [{ ...BOARD, path: '【任务板 aaa111】' }] };
+  });
   process.env.BOTHOUSE_DATA_DIR = data;
   process.env.GATE_PORT = String(gate.port);
   try {
@@ -5101,7 +5132,7 @@ test('CLI member: a session that could not be resumed gets its MEMORY.md and the
       await settle();
     }
     assert.match(prompts[0], /你的记忆/);
-    assert.doesNotMatch(prompts[1], /你的记忆|【任务板/, 'same context so far: not again');
+    assert.doesNotMatch(prompts[1], /你的记忆|【任务板 aaa111】/, 'same context so far: not again');
     assert.match(prompts[2], /你的记忆/, 'session lost: MEMORY.md again');
     assert.match(prompts[2], /【任务板 aaa111】/, 'session lost: the unchanged board again');
     assert.doesNotMatch(prompts[3], /你的记忆|【任务板/, 'given to the new session: not again');

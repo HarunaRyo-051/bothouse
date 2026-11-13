@@ -894,7 +894,7 @@ export class DshMembers {
     this.postFailure(job, error, `dsh-job-${jobId}-${state}-${Date.now()}`, {
       title: '成员出错', state: 'failed', action: 'configure-model', job_id: jobId,
       member_id: job.member_id, trigger_id: job.trigger_id,
-      ...(model === undefined ? {} : { detail: model.raw }),
+      detail: String(notice?.message ?? notice),
     });
     if (model !== undefined) this.hub.tasks?.failOpen?.(job.room_id, job.member_id, error);
   }
