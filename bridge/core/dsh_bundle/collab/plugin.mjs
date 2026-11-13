@@ -24,6 +24,7 @@ import { LeadState } from './lead-state.mjs';
 import { Attachments, INLINE_IMAGE } from './attachments.mjs';
 import { Later, registerLater } from './later.mjs';
 import { QuotaCooling, quotaDirectory } from './quota-cooling.mjs';
+import { wikiGalaxyRoute } from './wiki-galaxy.mjs';
 
 export const name = 'conest-collab';
 export const inject = [
@@ -78,7 +79,10 @@ export function resolveConfig(config, env = process.env) {
   const leadFile = c.leadFile ?? join(env.BOTHOUSE_DATA_DIR ?? join(env.HOME ?? '.', '.bothouse'), 'lead.json');
   if (!isAbsolute(leadFile)) throw Error('conest-collab: leadFile must be an absolute path');
   const fallbackLead = String(c.fallbackLead ?? env.CONEST_FALLBACK_LEAD ?? '').trim();
-  return { dataDir: c.dataDir, workspacePath: c.workspacePath, leadFile, fallbackLead, rooms, dshMembers: members, maxRelay, botTokenEnv, botToken, ownerName: c.ownerName ?? '我' };
+  // Wiki 星河 reads a markdown wiki; same resolution as develop: config → env → ~/wiki.
+  const wikiDir = String(c.wikiDir ?? env.CONEST_WIKI_DIR ?? '').trim() || (env.HOME ? join(env.HOME, 'wiki') : undefined);
+  if (wikiDir !== undefined && !isAbsolute(wikiDir)) throw Error('conest-collab: wikiDir must be an absolute path');
+  return { dataDir: c.dataDir, workspacePath: c.workspacePath, leadFile, fallbackLead, rooms, dshMembers: members, maxRelay, botTokenEnv, botToken, wikiDir, ownerName: c.ownerName ?? '我' };
 }
 
 /** Resolve a package from the running DSH installation, never a second copy. */
@@ -236,6 +240,8 @@ export async function apply(ctx, rawConfig) {
         return { lead_id: id, effective_lead_id: hub.primaryMember()?.id ?? null };
       });
     }
+    // Wiki 星河 (#987): a read-only picture of the configured markdown wiki.
+    if (config.wikiDir !== undefined && wikiGalaxyRoute(req, res, url, { wikiDir: config.wikiDir })) return;
     const att = /^\/collab\/api\/attachments\/([0-9a-f-]{36})$/.exec(path);
     if (att !== null && req.method === 'GET') {
       const row = store.attachmentMeta(att[1]);
