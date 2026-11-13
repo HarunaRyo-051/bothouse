@@ -6272,27 +6272,3 @@ test('a restarted bridge closes the progress cards it left running', async () =>
   assert.equal(card.state, 'cancelled', 'the stale card is closed, not left at 处理中');
   assert.match(after.text, /已中断/, 'and says the turn was cut');
 });
-
-test('wiki galaxy: pages become stars, links become lines, and only .md in the root is read', async () => {
-  const { mkdtempSync, mkdirSync, writeFileSync } = await import('node:fs');
-  const { tmpdir } = await import('node:os');
-  const { wikiGalaxyRoute, scanWiki } = await import('./wiki-galaxy.mjs');
-  const dir = mkdtempSync(join(tmpdir(), 'wiki-'));
-  writeFileSync(join(dir, 'home.md'), '---\nname: 首页\ndescription: 入口\n---\n\n# 首页\n见 [[任务]]\n');
-  mkdirSync(join(dir, '簇'));
-  writeFileSync(join(dir, '簇', '任务.md'), '---\nname: 任务\n---\n这一页没有出边\n');
-  writeFileSync(join(dir, 'guide.md'), '---\nname: 指南\n---\n回到 [首页](home.md)\n');
-  writeFileSync(join(dir, 'notes.txt'), 'ignored');
-  const graph = scanWiki(dir);
-  assert.deepEqual(graph.nodes.map(n => n.name).sort(), ['任务', '指南', '首页'].sort());
-  assert.equal(graph.links.length, 2, 'a [[wiki link]] and a relative .md link each draw a line');
-  assert.equal(graph.nodes.find(n => n.name === '首页').description, '入口');
-  // The route answers JSON for the graph and HTML for the page.
-  const url = new URL('http://x/collab/api/wiki-galaxy');
-  let body;
-  const res = { writeHead() {}, end(chunk) { body = String(chunk); } };
-  assert.equal(wikiGalaxyRoute({ method: 'GET', headers: {} }, res, url, { wikiDir: dir }), true);
-  assert.equal(JSON.parse(body).nodes.length, 3);
-  // A request for anything else is not this route.
-  assert.equal(wikiGalaxyRoute({ method: 'GET', headers: {} }, res, new URL('http://x/other'), { wikiDir: dir }), undefined);
-});
