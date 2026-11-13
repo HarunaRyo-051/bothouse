@@ -734,7 +734,9 @@ export class Tasks {
     }
     // handBack false: a DSH reply in a workspace, which hands back only with [report] (fromMessage).
     if (!handBack) return undefined;
-    const callsLead = lead !== undefined && mentions(text, team).has(lead.id);
+    const autoPrefix = msg.auto_lead_mention && lead !== undefined ? `@${lead.name} ` : '';
+    const explicitText = autoPrefix && text.startsWith(autoPrefix) ? text.slice(autoPrefix.length) : text;
+    const callsLead = lead !== undefined && mentions(explicitText, team).has(lead.id);
     if (!callsLead) return undefined;
     const open = this.q.openChat.get(msg.room_id, msg.author, lead.id, ...WORKING);
     if (open === undefined || open.source === 'review') return undefined;

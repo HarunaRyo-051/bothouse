@@ -1054,6 +1054,31 @@ test('DSH member: the answer to the lead\'s dispatch starts with @lead and wakes
   assert.ok(hub.store.openJobs().some(j => j.member_id === 'ds' && j.trigger_id === back.id));
 });
 
+test('native turn: auto-added lead mention wakes but never hands back a task', async () => {
+  const hub = makeHub();
+  const dsh = fakeDsh();
+  dsh.attach(hub, [{ id: 'zhu', name: '主' }, { id: 'fu', name: '副' }]);
+  hub.leadState = { selected: () => 'zhu' };
+  const tasks = new Tasks(hub, { setTimer: () => ({}), clearTimer() {} });
+  hub.tasks = tasks;
+  hub.post(1, { authorKind: 'role', author: 'zhu', name: '主', text: '@副 修一下' });
+  await settle();
+  const task = tasks.list(1).find(t => t.owner === 'fu');
+  const agent = dsh.sessions.get(dsh.made[0]);
+  dsh.turn(agent, ['主，改好了']);
+  await settle();
+  assert.equal(hub.store.job(1).state, 'done');
+  assert.equal(tasks.task(task.id).status, 'assigned', 'auto mention is a notification, not an explicit hand-back');
+  const auto = hub.store.page(1, undefined, 1)[0];
+  assert.ok(mentions(auto.text, hub.routable()).has('zhu'), 'auto mention still wakes the lead');
+  hub.post(1, { authorKind: 'role', author: 'zhu', name: '主', text: '@副 请明确交回' });
+  await settle();
+  dsh.turn(agent, ['@主 改好了']);
+  await settle();
+  assert.equal(tasks.task(task.id).status, 'returned', 'a model-authored @ still hands back');
+  hub.store.close();
+});
+
 test('DSH member: a discarded input ends its job and frees the queue', async () => {
   const hub = makeHub();
   const dsh = fakeDsh();

@@ -720,9 +720,11 @@ export class DshMembers {
       if (modelErrorReply(text) !== undefined) { this.fail(job.id, text); return; }
       latest = '';
       const reply = this.returnToLead(job, member, text);
+      const lead = this.dispatchedBy(job, member);
+      const autoLeadMention = lead !== undefined && !mentions(text, this.hub.routableIn(job.room_id)).has(lead.id);
       const converted = localImageReply(reply, cwd, this.rt.files, this.rt.logger);
-      const committed = draft === undefined ? undefined : this.hub.commit(draft.id, 'role', member.id, converted.text, undefined, converted.attachments);
-      const message = committed ?? this.hub.post(job.room_id, { authorKind: 'role', author: member.id, name: member.name, clientKey, text: converted.text, attachments: converted.attachments }).message;
+      const committed = draft === undefined ? undefined : this.hub.commit(draft.id, 'role', member.id, converted.text, undefined, converted.attachments, autoLeadMention);
+      const message = committed ?? this.hub.post(job.room_id, { authorKind: 'role', author: member.id, name: member.name, clientKey, text: converted.text, attachments: converted.attachments, autoLeadMention }).message;
       this.noteMemoryUse(member, room, message);
       done = true;
       this.store.finishJob(job.id, 'done', message.id);
@@ -841,11 +843,13 @@ export class DshMembers {
       return false;
     }
     const reply = this.returnToLead(job, member, complete ? text : `${text}\n\n（这一轮没有正常结束：${describeReason(reason)}）`);
+    const lead = this.dispatchedBy(job, member);
+    const autoLeadMention = lead !== undefined && !mentions(text, this.hub.routableIn(job.room_id)).has(lead.id);
     const cwd = this.store.workspacePath(job.room_id, this.rt.workspacePath);
     const converted = localImageReply(reply, cwd, this.rt.files, this.rt.logger);
     const { message } = this.hub.post(job.room_id, {
       authorKind: 'role', author: member.id, name: member.name, clientKey: `dsh-job-${job.id}`,
-      text: converted.text, attachments: converted.attachments,
+      text: converted.text, attachments: converted.attachments, autoLeadMention,
     });
     this.noteMemoryUse(member, this.store.room(job.room_id), message);
     this.store.finishJob(job.id, 'done', message.id);

@@ -142,8 +142,9 @@ export class Hub {
       });
     }
     this.emit({ type: 'message', message: publicMessage(result.message, this.store) });
+    const delivered = m.autoLeadMention ? { ...result.message, auto_lead_mention: true } : result.message;
     for (const listener of this.listeners) {
-      Promise.resolve().then(() => listener(result.message)).catch((error) => {
+      Promise.resolve().then(() => listener(delivered)).catch((error) => {
         this.logger.warn('collab: message listener failed: %s', error?.stack ?? error);
       });
     }
@@ -162,7 +163,7 @@ export class Hub {
     return r;
   }
 
-  commit(id, authorKind, author, text, fromTurn, attachments) {
+  commit(id, authorKind, author, text, fromTurn, attachments, autoLeadMention = false) {
     const after = [];
     const r = this.store.transaction(() => {
       const c = this.store.commit(id, authorKind, author, text, fromTurn, attachments);
@@ -178,8 +179,9 @@ export class Hub {
         this.logger.warn('collab: post-commit step failed: %s', error?.stack ?? error);
       });
     }
+    const delivered = autoLeadMention ? { ...row, auto_lead_mention: true } : row;
     for (const listener of this.listeners) {
-      Promise.resolve().then(() => listener(row)).catch((error) => {
+      Promise.resolve().then(() => listener(delivered)).catch((error) => {
         this.logger.warn('collab: message listener failed: %s', error?.stack ?? error);
       });
     }
