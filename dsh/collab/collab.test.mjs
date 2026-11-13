@@ -6242,3 +6242,14 @@ test('a busy dispatcher hands the review to a free teammate, who may then review
   assert.throws(() => tasks.review(t.id, { actor: 'doer', verdict: 'done' }), /can review task/);
   assert.equal(tasks.review(t.id, { actor: 'helper', verdict: 'done' }).status, 'done');
 });
+
+test('report self-check lists what a hand-back still misses', async () => {
+  const { checkReport, REPORT_SKELETON } = await import('./team-exit.mjs');
+  assert.deepEqual(checkReport('[report] #7 背景：修登录\n做了什么：改了\n要你做的：验收\n我加的：无'), []);
+  const problems = checkReport('[report] #7 修了一下');
+  assert.equal(problems.length, 3);
+  assert.match(problems.join('|'), /背景/);
+  assert.deepEqual(checkReport('[ask] #9 背景：选方案\n要你做的：选 A 还是 B\n我加的：无'), []);
+  assert.match(checkReport('没标记的话').join('|'), /\[report\]/);
+  assert.match(REPORT_SKELETON, /我加的：/);
+});

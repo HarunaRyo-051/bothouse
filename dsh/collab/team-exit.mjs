@@ -163,6 +163,33 @@ const LINE_MARK = new RegExp(`^[ \\t]*(${MARKS})`, 'i');
  * a DSH reply comes back as 「@主 [report]…」, dsh-member.mjs returnToLead, also as a later part of
  * the turn's row, #597 G40), as for its stance line.
  */
+/** The four parts a hand-back has to carry; the handoff shows this so a member can copy it. */
+export const REPORT_SKELETON = `[report] #<任务号> 背景：<为什么做这件事>
+做了什么：<一句话说清改了什么>
+要你做的：<验收要点；没有就写「没有」>
+我加的：<用户没要求、你自己定的；没有就写「无」>`;
+
+/**
+ * 交回前自查：what a [report]/[ask] reply still misses. Empty means it would be accepted, so a
+ * member can check itself (report-check.mjs) instead of learning it from a bounce.
+ */
+export function checkReport(text) {
+  const raw = String(text ?? '').trim();
+  if (raw === '') return ['正文是空的'];
+  const mark = exitMark(raw, { lastLine: true });
+  if (mark === undefined) return ['第一行要以 [report] 或 [ask] 开头'];
+  const problems = [];
+  if (!/^\[?(?:report|ask)\]?\s*#\d+/.test(String(mark.body).trim()) && !/^\s*\[?(?:report|ask)\]?\s*#\d+/.test(raw)) problems.push('第一行要带 #任务号');
+  // The body starts with 「#7 」 before 背景：, which anchors to a line start.
+  const body = String(mark.body).replace(/^#\d+[ \t]*/, '');
+  // The part markers anchor to a line start, and one part per line.
+  const has = re => body.split('\n').some(line => re.test(line));
+  if (!has(BACKGROUND)) problems.push('缺「背景：」');
+  if (!has(TODO)) problems.push('缺「要你做的：」');
+  if (!has(ADDED)) problems.push('缺「我加的：」（没有就写「无」）');
+  return problems;
+}
+
 export function exitMark(text, { lastLine = false, team = [] } = {}) {
   const t = withoutLeadingMentions(String(text ?? ''), team).trim();
   let m = firstMark(t);

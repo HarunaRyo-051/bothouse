@@ -102,7 +102,9 @@ export class Later {
     // #597 G26: a member once sent the ticket to /tasks and gave up on the 401; spell out the one call.
     const url = `${this.origin ?? 'http://<本机 DSH 地址>'}/collab/api/rooms/${room}/workspaces`;
     const curl = `curl -sS -X POST ${quote(url)} -H 'content-type: application/json' -H ${quote(`X-Later-Ticket: ${ticket}`)} -d '{"title":"任务标题","owner":"接活人id（必填）","reason":"交接说明"}'`;
-    return `\n【开工作区】整块活要交出去时，建工作区=这一条，任务和十分钟看门会自动开，不要另调 /tasks（它不认票据）。${local}或等价的接口 POST /collab/api/rooms/${room}/workspaces：\n${curl}\n一步建好工作区、开任务、挂十分钟看门并叫醒接活人；不要再在频道里 @ 同一件活。返回不是 200 就把返回原样告诉用户，不要悄悄自己做。工作区里的接活人是新会话，只看得到交接说明：里面要写清用户原话、参照的现成实现、以哪个分支为底、验收标准。\n`;
+    // Kept inline: this file must run on its own (the CLI is copied into a temp dir in tests).
+    const skeleton = '[report] #<任务号> 背景：<为什么做这件事>\n做了什么：<一句话说清改了什么>\n要你做的：<验收要点；没有就写「没有」>\n我加的：<用户没要求、你自己定的；没有就写「无」>';
+    return `\n【开工作区】整块活要交出去时，建工作区=这一条，任务和十分钟看门会自动开，不要另调 /tasks（它不认票据）。${local}或等价的接口 POST /collab/api/rooms/${room}/workspaces：\n${curl}\n一步建好工作区、开任务、挂十分钟看门并叫醒接活人；不要再在频道里 @ 同一件活。返回不是 200 就把返回原样告诉用户，不要悄悄自己做。工作区里的接活人是新会话，只看得到交接说明：里面要写清用户原话、参照的现成实现、以哪个分支为底、验收标准。\n交回前先自查，别等被退回：用 dsh/collab/report-check.mjs 跑一遍你的报告文件，通过再发。骨架：\n${skeleton}\n`;
   }
   tick() {
     for (const row of this.db.prepare('SELECT * FROM member_later WHERE announced = 0').all()) {
