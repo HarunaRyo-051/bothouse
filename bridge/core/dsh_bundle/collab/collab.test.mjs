@@ -6366,11 +6366,15 @@ test('记忆论坛 调用链: noteMemoryUse 记账后重发消息，且只按行
   subject.noteMemoryUse({ id: 'ds', name: 'DS' }, room, notMine);
   assert.equal(existsSync(join(dir, 'roles', 'ds', 'wiki', 'memory', '误收内容.md')), false, '别处出现的「做了什么」不算');
 
-  const long = '把徽标补上，并且把完整结论保留下来，尾巴不能被截掉';
+  // 超过 160 字：description 会被截短，但**文件正文**必须保留尾巴，否则长结论等于丢了。
+  const long = '把徽标补上，并且把完整结论保留下来，' + '这一段是没有被要求保留的细节说明，'.repeat(10) + '尾巴不能被截掉';
+  assert.ok(long.length > 160, `长句要真的长，实际 ${long.length} 字`);
   const report = { id: 11, room_id: 1, text: `[report] #5 背景：x\n做了什么：${long}\n要你用的：无\n我加的：无`, author: 'ds' };
   subject.noteMemoryUse({ id: 'ds', name: 'DS' }, room, report);
   const files = readdirSync(join(dir, 'roles', 'ds', 'wiki', 'memory'));
   const written = files.find(name => name.startsWith('把徽标补上'));
   assert.ok(written, `应写出一页，实际: ${files.join(',')}`);
-  assert.match(readFileSync(join(dir, 'roles', 'ds', 'wiki', 'memory', written), 'utf8'), /尾巴不能被截掉/, '完整正文要保留');
+  const page = readFileSync(join(dir, 'roles', 'ds', 'wiki', 'memory', written), 'utf8');
+  assert.ok(page.endsWith(`${long}\n`) || page.includes(long), '完整正文（含尾巴）要在文件里');
+  assert.ok(page.length > 160, '文件比 description 长：正文没有被截断');
 });
