@@ -6253,3 +6253,22 @@ test('report self-check lists what a hand-back still misses', async () => {
   assert.match(checkReport('没标记的话').join('|'), /\[report\]/);
   assert.match(REPORT_SKELETON, /我加的：/);
 });
+
+test('a restarted bridge closes the progress cards it left running', async () => {
+  const hub = makeHub();
+  const gw = new CloudWebGateway(hub, {});
+  const bot = connect(gw, 'bot=dou&name=大豆包');
+  hub.store.ensureRoom(1, 'general');
+  bot.frame({ type: 'preview_start', ref_id: 'r1', reply_ctx: 'room-1',
+    content: PROGRESS_PREFIX + JSON.stringify({ state: 'running', steps: 2, agent: 'Claude', text: '🔧 Bash — go test' }) });
+  await tick();
+  const before = hub.store.page(1).at(-1);
+  assert.equal(JSON.parse(before.card).state, 'running');
+  // The bridge comes back: the old card cannot ever be edited again.
+  connect(gw, 'bot=dou&name=大豆包');
+  await tick();
+  const after = hub.store.page(1).find(m => m.id === before.id);
+  const card = JSON.parse(after.card);
+  assert.equal(card.state, 'cancelled', 'the stale card is closed, not left at 处理中');
+  assert.match(after.text, /已中断/, 'and says the turn was cut');
+});
