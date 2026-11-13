@@ -1949,3 +1949,10 @@
 .dshc_briefChip[data-state="failed"] {
   background: #ef444429;
 }
+
+.dshc_embedFrame {
+  background: var(--dsw-alias-bg-base);
+  border: 0;
+  width: 100%;
+  height: 100%;
+}

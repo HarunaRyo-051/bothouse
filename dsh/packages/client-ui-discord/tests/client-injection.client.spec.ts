@@ -18,8 +18,9 @@ it.each([true, false])('injects channel actions and uses the settings shell when
       entriesOfSlot: () => available ? [{ store: shellStore }] : [],
       subscribe: () => () => {},
       inject: (_slot: string, register: () => (() => void)) => { cleanups.push(register()) },
-      register: (definition: { name: string; inject?: () => ChannelsInjected }) => {
-        if (definition.name === 'main') injectMain = definition.inject
+      register: (definition: { name: string; key?: string; inject?: () => ChannelsInjected }) => {
+        // Only the channels panel injects the actions; the wiki galaxy registers its own main panel.
+        if (definition.name === 'main' && definition.key === 'channels') injectMain = definition.inject
         return () => {}
       },
     },

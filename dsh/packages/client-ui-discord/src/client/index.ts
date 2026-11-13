@@ -11,6 +11,8 @@ import type { StoreHandle } from '@deepseek-ai/dsh-client-store'
 import type { MainPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
 import { browserTransport, createChannelSource } from './channel-source.ts'
 import { ChannelsIcon } from './ChannelsIcon.tsx'
+import { GalaxyIcon } from './GalaxyIcon.tsx'
+import { EmbedPage } from './EmbedPage.tsx'
 import { ChannelsPage, type ChannelsInjected } from './ChannelsPage.tsx'
 import { en, NS, zh, type ChannelsKey } from './locales.ts'
 
@@ -27,6 +29,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 // Borrow the settings shell root store seat; the renderer shares its instance.
 type SettingsStore = StoreHandle<object, { openSection(draft: object, id: string): void }>
 
+const GALAXY_ID = 'wiki-galaxy' as MainPanelId
 const PANEL_ID = 'channels' as MainPanelId
 
 /** Required browser services. */
@@ -105,4 +108,18 @@ export function apply(ctx: ClientContext): void {
     locale: NS,
     label: () => t('panel'),
   }, ChannelsIcon))
+
+  // Wiki 星河 as its own main panel and sidebar entry, right under Channels: the desktop app has no
+  // address bar, so the page needs a way in.
+  ctx.slots.inject('main', () => ctx.slots.register({
+    name: 'main', key: GALAXY_ID, locale: NS,
+    inject: () => ({ path: 'collab/wiki-galaxy', title: t('panelGalaxy') }),
+  }, EmbedPage))
+  ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
+    name: 'sidebar.panellist',
+    id: GALAXY_ID,
+    order: 6,
+    locale: NS,
+    label: () => t('panelGalaxy'),
+  }, GalaxyIcon))
 }
