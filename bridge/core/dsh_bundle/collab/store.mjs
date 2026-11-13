@@ -27,6 +27,7 @@ const COLUMNS = [
   ['members', 'no_dispatch', 'INTEGER NOT NULL DEFAULT 0'],
   ['tasks', 'termination_reason', 'TEXT'], // v: why a task was cancelled/superseded (terminal states)
   ['tasks', 'superseded_by', 'INTEGER'],
+  ['tasks', 'reviewer', 'TEXT'], // who reviews a hand-back when its dispatcher is busy (null: the dispatcher)
   ['bindings', 'workspace_path', 'TEXT'], // Keep a CLI conversation in its original directory until /new. // NULL keeps existing names unchanged; only new UI members opt in.
 
   ['jobs', 'input_id', 'TEXT'], // v2: jobs remember the id of the input they admitted, to bind its consuming turn.
@@ -263,12 +264,13 @@ export class Store {
         base TEXT,
         card_member_id TEXT,
         termination_reason TEXT,
+        reviewer TEXT,
         superseded_by INTEGER,
         renewals INTEGER NOT NULL DEFAULT 0)`);
     } else {
       const cols = new Set(this.db.prepare('PRAGMA table_info(tasks)').all().map(c => c.name));
       for (const [name, type] of [['parent_task', 'INTEGER'], ['next_check_at', 'REAL'], ['result_msg_id', 'INTEGER'],
-        ['assign_msg_id', 'INTEGER'], ['note', 'TEXT'], ['returned_at', 'REAL'], ['remind_msg_id', 'INTEGER'], ['reason', 'TEXT'], ['paused_at', 'REAL'], ['paused_chat', 'INTEGER'], ['source', 'TEXT'], ['ref', 'TEXT'], ['base', 'TEXT'], ['renewals', 'INTEGER NOT NULL DEFAULT 0'], ['card_member_id', 'TEXT'], ['termination_reason', 'TEXT'], ['superseded_by', 'INTEGER']]) {
+        ['assign_msg_id', 'INTEGER'], ['note', 'TEXT'], ['returned_at', 'REAL'], ['remind_msg_id', 'INTEGER'], ['reason', 'TEXT'], ['paused_at', 'REAL'], ['paused_chat', 'INTEGER'], ['source', 'TEXT'], ['ref', 'TEXT'], ['base', 'TEXT'], ['renewals', 'INTEGER NOT NULL DEFAULT 0'], ['card_member_id', 'TEXT'], ['termination_reason', 'TEXT'], ['superseded_by', 'INTEGER'], ['reviewer', 'TEXT']]) {
         if (!cols.has(name)) this.db.exec(`ALTER TABLE tasks ADD COLUMN ${name} ${type}`);
       }
       // #574 B2 upgrade: workspace tasks in work with no check time start their 10-minute watch

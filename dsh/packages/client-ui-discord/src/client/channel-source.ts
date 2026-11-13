@@ -243,6 +243,9 @@ export interface ChannelTask {
   readonly assign_msg_id: number | null
   /** Delivery message bound at hand-back. */
   readonly result_msg_id: number | null
+  /** Who reviews this hand-back when its dispatcher was busy (null: the dispatcher). */
+  readonly reviewer?: string | null
+  readonly reviewer_name?: string | null
   readonly note: string | null
   readonly created_at: number
   readonly updated_at: number

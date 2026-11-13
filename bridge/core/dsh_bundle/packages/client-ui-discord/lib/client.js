@@ -1,4 +1,4 @@
-// dsh-client-source-sha256: 028ceabd25d275b53179f359d2e0422a06a27a1a787bace7925747b600360222
+// dsh-client-source-sha256: 3c969e33125c2d9ebfa413dba4055ec35ecdca317d7380ff363d681482b7dff9
 // dsh-style-sha256: 6c353c03e8b2bafc2b0600433fd98d3989be43aae47a14b78bfcdaf5063817ee
 window.__ModuleLoader__.load({
  id: "@deepseek-ai/dsh-experimental-client-ui-discord",
@@ -17308,7 +17308,8 @@ function TaskBoard({ tasks, rooms, chatId, roomId, t, onOpen, onReview, onReloca
 				children: [
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: task.owner_name }),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: t("taskElapsed", { d: formatDuration(elapsed(task, now), t) }) }),
-					task.next_check_at !== null && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: t("taskNextCheck", { time: clock(task.next_check_at) }) })
+					task.next_check_at !== null && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: t("taskNextCheck", { time: clock(task.next_check_at) }) }),
+					task.reviewer_name != null && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: t("taskReviewer", { name: task.reviewer_name }) })
 				]
 			}),
 			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
@@ -20692,6 +20693,7 @@ const zh = {
 	channelProgressWorking: "进行中 {n}",
 	channelProgressReview: "待验收 {n}",
 	channelProgressDone: "已完成 {n}",
+	taskReviewer: "验收人 {name}",
 	taskTerminate: "终止任务",
 	taskTerminateConfirm: "确定终止这个任务吗？终止后不再计时、不再催办，工作区会释放。",
 	taskTerminateReason: "用户在任务板终止",
@@ -20904,6 +20906,7 @@ const en = {
 	channelProgressWorking: "{n} running",
 	channelProgressReview: "{n} to review",
 	channelProgressDone: "{n} done",
+	taskReviewer: "Reviewer {name}",
 	taskTerminate: "Terminate task",
 	taskTerminateConfirm: "Terminate this task? It stops being watched and its workspace is released.",
 	taskTerminateReason: "Terminated from the task board",

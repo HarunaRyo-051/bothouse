@@ -231,6 +231,8 @@ export class Tasks {
       status: t.status, next_check_at: t.next_check_at, assign_msg_id: t.assign_msg_id, result_msg_id: t.result_msg_id,
       note: t.note, reason: t.reason, ref: t.ref ?? null, base: t.base ?? null, created_at: t.created_at, updated_at: t.updated_at, returned_at: t.returned_at,
       paused_at: t.paused_at ?? null, paused_chat: t.paused_chat ?? null,
+      // Who is expected to review this hand-back when its dispatcher was busy at hand-back time.
+      reviewer: t.reviewer ?? null, reviewer_name: t.reviewer == null ? null : this.nameOf(t.reviewer),
     };
   }
 
@@ -270,6 +272,27 @@ export class Tasks {
       roomName,
       durationText: dur,
     };
+  }
+
+  /**
+   * Who reviews this hand-back: the dispatcher when they are free (they asked for the work), else a
+   * teammate who is not the author and has no task in work. Null when nobody qualifies — then the
+   * task stays with its dispatcher rather than being handed to someone who cannot look at it.
+   */
+  reviewerFor(task) {
+    const busy = new Set(this.q.allBusy.all(...WORKING).map(row => row.owner));
+    const dispatcherBusy = busy.has(task.created_by);
+    if (!dispatcherBusy) return null;
+    const candidates = [];
+    for (const member of this.hub.members.values()) {
+      if (member.kind === 'human' || member.id === task.owner || member.id === task.created_by) continue;
+      if (member.online === false) continue;
+      if (busy.has(member.id)) continue;
+      if (this.store.noDispatch(task.room_id, member.id)) continue;
+      candidates.push(member.id);
+    }
+    // Least recently used first: a reviewer who has not been picked recently spreads the load.
+    return candidates.length === 0 ? null : candidates.sort()[0];
   }
 
   /** Map of memberId -> busy info for all active tasks across all rooms. */
@@ -384,7 +407,10 @@ export class Tasks {
     const now = this.now();
     const row = this.q.handBack.get(messageId, now, now, id, task.status);
     if (row === undefined) throw new CollabError('conflict', `task ${id} changed meanwhile`);
-    this.record(row, 'return', `#${id}「${row.title}」${this.nameOf(row.owner)} 交回，用时 ${duration(row.returned_at - row.created_at)}`);
+    const reviewer = this.reviewerFor(row);
+    if (reviewer !== null) this.db.prepare('UPDATE tasks SET reviewer = ? WHERE id = ?').run(reviewer, id);
+    this.record(row, 'return', `#${id}「${row.title}」${this.nameOf(row.owner)} 交回，用时 ${duration(row.returned_at - row.created_at)}`
+      + (reviewer === null ? '' : `；派活人正忙，转给空闲的 ${this.nameOf(reviewer)} 验收`));
     this.returnToChat(row, messageId);
     this.releaseIfDone(row.room_id);
     return this.changed(id);
@@ -449,7 +475,7 @@ export class Tasks {
     const reviews = this.db.prepare(`SELECT * FROM tasks WHERE parent_task = ? AND source = 'review'
       AND status IN (${PLACEHOLDERS})`).all(id, ...WORKING);
     const delegated = actor !== task.owner && reviews.some(r => r.owner === actor && r.paused_at == null);
-    if (actor !== task.created_by && actor !== HUMAN && !delegated) throw new CollabError('forbidden', `only ${this.nameOf(task.created_by)} or their delegated reviewer can review task ${id}`);
+    if (actor !== task.created_by && actor !== HUMAN && !delegated && actor !== task.reviewer) throw new CollabError('forbidden', `only ${this.nameOf(task.created_by)} or their delegated reviewer can review task ${id}`);
     if (!REVIEWABLE.includes(task.status)) throw new CollabError('conflict', `task ${id} is ${STATUS[task.status]}, nothing to review`);
     if (verdict !== 'done' && verdict !== 'rework') throw new CollabError('invalid', 'verdict must be done or rework');
     // #574: a send-back always says why (same rule as board done: rework count > 0 needs a reason).

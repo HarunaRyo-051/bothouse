@@ -102,6 +102,7 @@ export function TaskBoard({ tasks, rooms, chatId, roomId, t, onOpen, onReview, o
         <span>{task.owner_name}</span>
         <span>{t('taskElapsed', { d: formatDuration(elapsed(task, now), t) })}</span>
         {task.next_check_at !== null && <span>{t('taskNextCheck', { time: clock(task.next_check_at) })}</span>}
+        {task.reviewer_name != null && <span>{t('taskReviewer', { name: task.reviewer_name })}</span>}
       </div>
       <div className={css.taskLinks}>
         {task.assign_msg_id !== null && <button type="button" className={css.linkButton} onClick={() => { jump(task.room_id, task.assign_msg_id as number) }}>{t('taskOpenAssign')}</button>}

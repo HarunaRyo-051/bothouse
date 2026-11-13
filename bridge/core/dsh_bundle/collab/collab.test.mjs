@@ -6221,3 +6221,24 @@ test('a delivered page renders in place with a sandbox CSP; a download stays a d
   }
   assert.equal(HTML_PAGE.test('text/html'), true);
 });
+
+test('a busy dispatcher hands the review to a free teammate, who may then review', () => {
+  const hub = makeHub();
+  hub.setMember({ id: 'lead', name: '派活人', kind: 'dsh', online: true });
+  hub.setMember({ id: 'doer', name: '干活', kind: 'dsh', online: true });
+  hub.setMember({ id: 'helper', name: '空着', kind: 'dsh', online: true });
+  const tasks = new Tasks(hub, { start: false });
+  hub.tasks = tasks;
+  // The dispatcher is busy with another task of their own.
+  tasks.assign({ roomId: 1, title: '派活人自己在做的', owner: 'lead', actor: 'owner' });
+  const t = tasks.assign({ roomId: 1, title: '交回的', owner: 'doer', actor: 'lead' });
+  const msg = hub.post(1, { authorKind: 'role', author: 'doer', name: '干活', text: '做完了' }).message;
+  // The reviewer is chosen only at hand-back time, and only when the dispatcher is busy.
+  assert.equal(tasks.view(tasks.task(t.id)).reviewer, null, 'no reviewer before the hand-back');
+  tasks.handBack(t.id, { actor: 'doer', messageId: msg.id });
+  const reviewer = tasks.view(tasks.task(t.id)).reviewer;
+  assert.equal(reviewer, 'helper', 'a free teammate who is not the author reviews it');
+  // The chosen reviewer may review; an unrelated member still may not.
+  assert.throws(() => tasks.review(t.id, { actor: 'doer', verdict: 'done' }), /can review task/);
+  assert.equal(tasks.review(t.id, { actor: 'helper', verdict: 'done' }).status, 'done');
+});
