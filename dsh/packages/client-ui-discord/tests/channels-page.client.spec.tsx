@@ -315,6 +315,18 @@ describe('channels page', () => {
     expect(screen.getByRole('button', { name: zh.configureModel })).toBeTruthy()
   })
 
+  it('shows the raw model failure collapsed beneath the friendly error', () => {
+    const raw = 'Selected model is at capacity. Please try a different model.'
+    const card = JSON.stringify({ title: '成员出错', state: 'failed', action: 'configure-model', detail: raw })
+    const state = { ...ready, messages: [{ ...ready.messages[0], text: '模型那边满载，稍后重试或换个模型。', card }] }
+    const view = render(<ChannelsPage {...props(state)} />)
+    const details = view.container.querySelector('details')
+    expect(details?.open).toBe(false)
+    expect(details?.textContent).toContain(zh.originalError)
+    expect(details?.textContent).toContain(raw)
+    expect(view.container.querySelector('pre')?.textContent).toBe(raw)
+  })
+
   it.each([true, false])('routes model configuration with shell available=%s', (available) => {
     const card = JSON.stringify({ title: 'model', state: 'error', action: 'configure-model' })
     const state = { ...ready, messages: [{ ...ready.messages[0], card }] }
@@ -944,7 +956,7 @@ describe('multi-line messages and the narrow composer', () => {
     expect(Array.from(document.querySelectorAll('li')).map(li => li.textContent)).toEqual(['一', '二'])
     expect(document.querySelectorAll('li br')).toHaveLength(0)
     // Line breaks come from <br>, not from whitespace styling, so markdown's own "\n" text stays invisible.
-    expect(cssText()).not.toContain('pre-wrap')
+    expect(rule('.text')).not.toContain('pre-wrap')
   })
 
   // Before this fix (develop) messages went to MarkdownText unchanged; these shapes must render the same.

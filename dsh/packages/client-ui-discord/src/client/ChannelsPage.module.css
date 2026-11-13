@@ -338,6 +338,20 @@
   border-left-color: var(--dsw-alias-state-warning-primary, #faa61a);
 }
 
+.errorDetail {
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.errorDetail summary { cursor: pointer; }
+.errorDetail pre {
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
 .cardButtons {
   display: flex;
   flex-wrap: wrap;

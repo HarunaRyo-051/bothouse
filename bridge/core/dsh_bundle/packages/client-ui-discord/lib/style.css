@@ -332,6 +332,23 @@
   border-left-color: var(--dsw-alias-state-warning-primary, #faa61a);
 }
 
+.dshc_errorDetail {
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.dshc_errorDetail summary {
+  cursor: pointer;
+}
+
+.dshc_errorDetail pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+  max-height: 240px;
+  overflow: auto;
+}
+
 .dshc_cardButtons {
   flex-wrap: wrap;
   align-items: center;

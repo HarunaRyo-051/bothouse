@@ -157,9 +157,9 @@ function MessageRow({ message, member, t, onConfigure, menuOpen, onAvatar, onClo
   retrying: boolean
 }) {
   const labels = useMemo(() => ({ code: { copyLabel: t('copyCode'), copiedLabel: t('copiedCode') }, footnotes: t('footnotes') }), [t])
-  let card: { title?: string; state?: string; action?: string; kind?: string; task_id?: number; brief?: string } | undefined
+  let card: { title?: string; state?: string; action?: string; kind?: string; task_id?: number; brief?: string; detail?: string } | undefined
   if (message.card !== null) {
-    try { card = JSON.parse(message.card) as { title?: string; state?: string; action?: string; kind?: string; task_id?: number; brief?: string } } catch (error) { void error /* unreadable card metadata: render the text alone */ }
+    try { card = JSON.parse(message.card) as typeof card } catch (error) { void error /* unreadable card metadata: render the text alone */ }
   }
   // Parse once per text change: MessageRow re-renders on every composer keystroke.
   const briefOnly = typeof card?.brief === 'string' && cardView === 'brief'
@@ -262,7 +262,10 @@ function MessageRow({ message, member, t, onConfigure, menuOpen, onAvatar, onClo
                   )}
                 </div>
                 {briefOnly ? <BriefChips brief={shown} state={card?.state} /> : <div className={css.text}><MarkdownText text={markdown} labels={labels} /></div>}
-                {(card.state === 'failed' || card.action === 'configure-model') && (
+                {card.state === 'failed' && typeof card.detail === 'string' && card.detail.trim() !== '' && (
+                  <details className={css.errorDetail}><summary>{t('originalError')}</summary><pre>{card.detail}</pre></details>
+                )}
+                 {(card.state === 'failed' || card.action === 'configure-model') && (
                   <div className={css.cardButtons}>
                     {card.state !== 'retried' && (
                       <button type="button" className={css.secondaryButton} disabled={retrying} onClick={() => onRetry(message.id)}>
