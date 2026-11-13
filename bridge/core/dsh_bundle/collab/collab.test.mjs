@@ -6272,3 +6272,34 @@ test('a restarted bridge closes the progress cards it left running', async () =>
   assert.equal(card.state, 'cancelled', 'the stale card is closed, not left at 处理中');
   assert.match(after.text, /已中断/, 'and says the turn was cut');
 });
+
+test('记忆论坛: a turn carries only the pages that match, and a reply that cites one is recorded', async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { MemoryForum, MEMORY_LIMIT } = await import('./memory-forum.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'mem-'));
+  const forum = new MemoryForum({ dataDir: dir });
+  const page = (id, name, description) => {
+    mkdirSync(join(dir, 'roles', 'ds', 'wiki', 'memory'), { recursive: true });
+    writeFileSync(join(dir, 'roles', 'ds', 'wiki', 'memory', `${id}.md`), `---\nname: ${name}\ndescription: ${description}\n---\n`);
+  };
+  page('deploy', '上线检查', '发版前先看 CI 全绿');
+  page('park', '暂停任务', '暂停的任务不算忙碌');
+  assert.equal(forum.entries('ds').length, 2);
+  // Only overlapping entries are pushed; a turn about deployment does not carry the parking note.
+  const picked = forum.select('ds', '帮我做一次上线 发版检查');
+  assert.deepEqual(picked.map(e => e.id), ['deploy']);
+  assert.match(forum.block(picked), /\[#deploy\] 上线检查/);
+  assert.deepEqual(forum.select('ds', '今天天气'), [], 'no overlap means nothing is pushed');
+  assert.ok(MEMORY_LIMIT >= 1);
+  // A reply that cites the page is recognised; one that does not is not.
+  forum.remember('ds', 1, picked);
+  assert.deepEqual(forum.cited('ds', 1, '做完了，按 [#deploy] 先看 CI').map(e => e.id), ['deploy']);
+  forum.remember('ds', 1, picked);
+  assert.deepEqual(forum.cited('ds', 1, '做完了'), []);
+  // Writing a page makes it readable next turn, and the same name overwrites instead of piling up.
+  forum.write('ds', { name: '新教训', description: '别在 /tmp 里装依赖' });
+  assert.ok(forum.entries('ds').some(e => e.name === '新教训'));
+  forum.write('ds', { name: '新教训', description: '更新后的描述' });
+  assert.equal(forum.entries('ds').filter(e => e.name === '新教训').length, 1);
+});

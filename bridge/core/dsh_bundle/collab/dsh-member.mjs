@@ -15,6 +15,8 @@ import { ChannelApprovals, DEFAULT_ACTIONS } from './approvals.mjs';
 import { DEFAULT_PERMISSION_PRESET, presetDecision } from './cli-member.mjs';
 import { GateContext } from './gate-context.mjs';
 import { MemoryIndex } from './memory-index.mjs';
+import { MemoryForum } from './memory-forum.mjs';
+import { exitMark } from './team-exit.mjs';
 // Shared with the bridge (bridge/core/team_mode.go): a common part, then one
 // "## <mode>" section per dispatch mode; a member sees only its room's section.
 const TEAM_MODE_FILE = readFileSync(new URL('./team-mode-rules.md', import.meta.url), 'utf8');
@@ -367,6 +369,7 @@ export class DshMembers {
     this.gateContext = runtime.gateContext ?? new GateContext({ logger: runtime.logger });
     /** The member's own MEMORY.md on the first turn of each conversation (bridge memory_index). */
     this.memoryIndex = runtime.memoryIndex ?? new MemoryIndex();
+    this.memoryForum = runtime.memoryForum ?? new MemoryForum();
     for (const m of members) this.publish(m);
     hub.onPlan(message => this.plan(message));
   }
@@ -716,6 +719,7 @@ export class DshMembers {
       const converted = localImageReply(reply, cwd, this.rt.files, this.rt.logger);
       const committed = draft === undefined ? undefined : this.hub.commit(draft.id, 'role', member.id, converted.text, undefined, converted.attachments);
       const message = committed ?? this.hub.post(job.room_id, { authorKind: 'role', author: member.id, name: member.name, clientKey, text: converted.text, attachments: converted.attachments }).message;
+      this.noteMemoryUse(member, room, message);
       done = true;
       this.store.finishJob(job.id, 'done', message.id);
     } catch (error) {
@@ -743,10 +747,26 @@ export class DshMembers {
     const trigger = unseen.at(-1);
     const memory = this.memoryIndex.turn({ member: member.id, room: room.id, session });
     const gate = await this.gateContext.turn({ member: member.id, room: room.id, session, text: trigger?.text ?? '' });
+    // 记忆论坛（轻量版）：every turn gets the pages that match what called it, not just a new context.
+    const picked = this.memoryForum.select(member.id, trigger?.text ?? '');
+    this.memoryForum.remember(member.id, room.id, picked);
     return {
-      block: [memory.block, gate.block].filter(Boolean).join('\n\n'),
+      block: [memory.block, gate.block, this.memoryForum.block(picked)].filter(Boolean).join('\n\n'),
       commit: () => { memory.commit(); gate.commit(); },
     };
+  }
+
+  /** Record which memory pages a reply said it used, and let a hand-back leave one behind. */
+  noteMemoryUse(member, room, message) {
+    const text = message?.text ?? '';
+    const cited = this.memoryForum.cited(member.id, room.id, text);
+    for (const entry of cited) this.store.recordMemoryUse(message.id, { member: member.id, room: room.id, entry: entry.id, name: entry.name });
+    // A hand-back is the one moment a member knows something worth keeping: write it as a page.
+    const mark = exitMark(text, { lastLine: true });
+    if (mark?.kind !== 'report') return;
+    const learned = /做了什么[ 	　]*[：:][ 	　]*(.+)/.exec(mark.body)?.[1]?.trim();
+    if (!learned) return;
+    this.memoryForum.write(member.id, { name: learned.slice(0, 40), description: `#${member.name} 在「${room.name}」交回时记下` });
   }
 
   /** A released workspace starts over: drop each local CLI member's ACP session for roomId. */

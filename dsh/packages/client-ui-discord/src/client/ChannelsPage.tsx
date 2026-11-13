@@ -231,6 +231,11 @@ function MessageRow({ message, member, t, onConfigure, menuOpen, onAvatar, onClo
             )
           : card === undefined
           ? <>{message.text !== '' && <div className={css.text}><MarkdownText text={markdown} labels={labels} /></div>}<AttachmentList attachments={message.attachments} t={t} />
+              {message.memory !== undefined && message.memory.length > 0 && (
+                <div className={css.memoryBadge} title={message.memory.map(entry => `#${entry.entry} ${entry.name}`).join('\n')}>
+                  🧠 {t('memoryUsed', { n: String(message.memory.length) })}
+                </div>
+              )}
               {delivered !== undefined && onReview !== undefined && (
                 <div className={css.deliveryReview}>
                   <button type="button" className={css.linkButton} onClick={() => { void onReview(delivered.id, 'done') }}>{t('deliveryAccept')}</button>

@@ -1649,3 +1649,18 @@
 .deliveryReview { display: flex; gap: 8px; margin-top: 6px; }
 
 .briefChip[data-state='failed'] { background: color-mix(in srgb, #ef4444 16%, transparent); }
+
+/* 记忆论坛: which memory pages a reply said it used. */
+.memoryBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--surface-2, #f5f5f5);
+  color: var(--text-2, #666);
+  font-size: 11px;
+  line-height: 18px;
+  cursor: default;
+}

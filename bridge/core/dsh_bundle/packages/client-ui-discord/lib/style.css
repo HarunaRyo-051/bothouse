@@ -1949,3 +1949,17 @@
 .dshc_briefChip[data-state="failed"] {
   background: #ef444429;
 }
+
+.dshc_memoryBadge {
+  background: var(--surface-2, #f5f5f5);
+  color: var(--text-2, #666);
+  cursor: default;
+  border-radius: 999px;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  padding: 0 8px;
+  font-size: 11px;
+  line-height: 18px;
+  display: inline-flex;
+}

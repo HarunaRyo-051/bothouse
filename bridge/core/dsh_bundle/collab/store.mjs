@@ -200,6 +200,11 @@ export class Store {
       this.dedupeWorkspaceNames();
       // v9: the tasks table (#139 team mode B), ensured idempotently like the columns above.
       this.ensureTasks();
+      // 记忆论坛（轻量版）：which memory page a reply said it used. One row per (message, entry).
+      this.db.exec(`CREATE TABLE IF NOT EXISTS memory_uses (
+        message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+        member_id TEXT NOT NULL, room_id INTEGER NOT NULL, entry TEXT NOT NULL, name TEXT NOT NULL,
+        created_at REAL NOT NULL, PRIMARY KEY (message_id, entry))`);
       this.db.exec(`CREATE TABLE IF NOT EXISTS dispatch_blocks (
         room_id INTEGER NOT NULL REFERENCES rooms(id), member_id TEXT NOT NULL,
         blocked INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (room_id, member_id))`);
@@ -801,6 +806,18 @@ export class Store {
     return this.closed ? [] : this.q.authorDrafts.all(authorKind, author);
   }
 
+  /** Record that a reply cited a memory page; a repeated (message, entry) is the same fact. */
+  recordMemoryUse(messageId, { member, room, entry, name }, now = Date.now() / 1000) {
+    this.db.prepare(`INSERT OR IGNORE INTO memory_uses (message_id, member_id, room_id, entry, name, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)`).run(messageId, member, room, entry, name, now);
+  }
+
+  /** The memory pages one message said it used, in the order they were recorded. */
+  memoryUses(messageId) {
+    if (this.closed) return [];
+    return this.db.prepare('SELECT entry, name FROM memory_uses WHERE message_id = ? ORDER BY rowid').all(messageId);
+  }
+
   /** Every live card row one author posted (#913), oldest first. */
   authorCards(authorKind, author) {
     return this.closed ? [] : this.q.authorCards.all(authorKind, author);
@@ -878,6 +895,9 @@ export function publicMessage(row, store) {
   if (quote !== undefined) out.reply_to = quote;
   const attachments = messageAttachments(row);
   if (attachments.length) out.attachments = attachments;
+  // 记忆论坛：the pages this reply said it used, so the channel can show a badge.
+  const memory = row.id == null ? [] : (store?.memoryUses?.(row.id) ?? []);
+  if (memory.length) out.memory = memory;
   return out;
 }
 

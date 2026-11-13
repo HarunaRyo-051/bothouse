@@ -24,6 +24,8 @@ export interface ChannelMessage {
   readonly reply_to?: ChannelQuote
   /** Uploaded images and files (#144); absent when there are none. */
   readonly attachments?: readonly ChannelAttachment[]
+  /** 记忆论坛: the memory pages this reply said it used. */
+  readonly memory?: readonly { readonly entry: string; readonly name: string }[]
   /** Unix seconds of the author's last edit (#148); absent if never edited. */
   readonly edited_at?: number
 }
