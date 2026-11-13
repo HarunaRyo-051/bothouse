@@ -5865,6 +5865,25 @@ for (const state of ['returned', 'done']) {
   });
 }
 
+test('member hand-back requires @lead; thanks after return does not hand back again', async () => {
+  const { tasks, say } = g34Setup();
+  say(1, '副，把 README 改一下', 'zhu');
+  await settle();
+  const [first] = tasks.list(1).filter(r => r.owner === 'fu');
+  assert.ok(first);
+  say(1, '主，谢谢，正在处理');
+  await settle();
+  assert.equal(tasks.task(first.id).status, 'assigned', 'bare-name reply is not a hand-back');
+  const result = say(1, '@主 改好了');
+  await settle();
+  assert.equal(tasks.task(first.id).status, 'returned');
+  assert.equal(tasks.task(first.id).result_msg_id, result.id);
+  say(1, '主，谢谢');
+  await settle();
+  assert.equal(tasks.task(first.id).result_msg_id, result.id, 'thanks cannot replace the delivered result');
+  assert.equal(tasks.list(1).filter(r => r.owner === 'fu').length, 1, 'thanks opens no new task');
+});
+
 test('r12: praise does not accept a mention task; thanks opens nothing, an @ still dispatches', async () => {
   const { tasks, say } = g34Setup();
   say(1, '副，把 README 改一下', 'zhu');

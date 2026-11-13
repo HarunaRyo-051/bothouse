@@ -734,7 +734,7 @@ export class Tasks {
     }
     // handBack false: a DSH reply in a workspace, which hands back only with [report] (fromMessage).
     if (!handBack) return undefined;
-    const callsLead = lead !== undefined && (mentions(text, team).has(lead.id) || nameCalled(text, lead.name, team.map(m => m.name)));
+    const callsLead = lead !== undefined && mentions(text, team).has(lead.id);
     if (!callsLead) return undefined;
     const open = this.q.openChat.get(msg.room_id, msg.author, lead.id, ...WORKING);
     if (open === undefined || open.source === 'review') return undefined;
