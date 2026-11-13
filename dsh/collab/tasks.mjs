@@ -12,12 +12,13 @@ import { mentions, nameCalled, split, withoutLeadingMentions } from './mentions.
 import { NOTICE_PREFIXES } from './cloudweb.mjs';
 import { exitMark, workspaceAskMark } from './team-exit.mjs';
 import { checkDispatch, HandoffRulesError } from './handoff-rules.mjs';
+import { modelErrorReply } from './model-errors.mjs';
 
 /** Status codes and their labels (the eight names are a #139 B setting, not user-specified). */
 export const STATUS = {
   assigned: '派出', accepted: '已接', asked: '有疑问', declined: '退回',
   escalated: '升级', returned: '交回', done: '完成', rework: '返工',
-  cancelled: '已取消', superseded: '已替代',
+  cancelled: '已取消', superseded: '已替代', failed: '出错',
 };
 /** Terminal states: nothing but a new task follows them. */
 export const TERMINAL = ['done', 'cancelled', 'superseded'];
@@ -562,6 +563,12 @@ export class Tasks {
   /** A member reply whose first line is 【接】【问】【退】【升】 (optionally #id) answers its task. */
   fromMessage(msg) {
     if (msg.author_kind !== 'role' || msg.card !== null) return undefined;
+    const lead = this.store.leadId(msg.room_id) === null ? this.hub.primaryMember() : this.hub.primaryIn(msg.room_id);
+    const failure = modelErrorReply(withoutLeadingMentions(String(msg.text), this.hub.routableIn(msg.room_id)));
+    if (failure !== undefined) {
+      if (msg.author !== lead?.id) this.failOpen(msg.room_id, msg.author, failure.zh);
+      return undefined;
+    }
     if (this.verdictsOf(msg)) return undefined;
     this.settleCall(msg);
     if (this.inWorkspace(msg.room_id) && workspaceAskMark(msg.text, this.hub.routableIn(msg.room_id))) return undefined;
@@ -716,6 +723,7 @@ export class Tasks {
         const key = `${msg.room_id}\0${owner}`;
         this.pendingCalls.delete(key);
         const latest = this.q.latestOf.get(msg.room_id, owner);
+        if (latest?.status === 'failed' && latest.created_by === lead.id) { this.retryFailed(latest.id); continue; }
         if (DELIVERED.includes(latest?.status) && !explicit.has(owner)) {
           this.pendingCalls.set(key, { roomId: msg.room_id, owner, lead: lead.id, title, messageId: msg.id, at: this.now() });
           continue;
@@ -1078,6 +1086,26 @@ export class Tasks {
     const moved = this.task(id);
     const record = this.record(moved, 'relocate', `@${name} #${id}「${task.title}」已迁到${workspace.name}继续，原任务编号和验收记录不变。`);
     this.wake(task.owner, record);
+    return this.changed(id);
+  }
+
+  /** A failed model turn does not count as a hand-back. Workspace work is parked. */
+  failOpen(roomId, owner, reason) {
+    const workspace = this.store.room(roomId)?.kind === 'workspace';
+    const task = this.openOf(roomId, owner);
+    if (task === undefined) return undefined;
+    const row = this.q.set.get('failed', null, clip(reason), this.now(), 0, task.id, task.status);
+    if (row === undefined) return undefined;
+    this.record(row, 'failed', `#${row.id}「${row.title}」${this.nameOf(row.owner)} 出错：${reason}（不算交回）`);
+    if (workspace) this.releaseIfDone(roomId);
+    return this.changed(row.id);
+  }
+
+  /** The next call to an owner with failed work reuses its task. */
+  retryFailed(id) {
+    const row = this.q.set.get('assigned', this.now() + CHECK_AFTER_S, null, this.now(), 0, id, 'failed');
+    if (row === undefined) return undefined;
+    this.record(row, 'retry', `#${id}「${row.title}」重新派给 ${this.nameOf(row.owner)}`);
     return this.changed(id);
   }
 

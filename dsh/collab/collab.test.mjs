@@ -6304,6 +6304,38 @@ test('记忆论坛: a turn carries only the pages that match, and a reply that c
   assert.equal(forum.entries('ds').filter(e => e.name === '新教训').length, 1);
 });
 
+test('model-only errors fail open work without hand-back, and the next call retries the same task', async () => {
+  const { hub, tasks, say } = g34Setup();
+  say(1, '@副 跑一次 date', 'zhu');
+  await settle();
+  const first = tasks.list(1).find(t => t.owner === 'fu' && t.room_id === 1);
+  say(1, '@主 Selected model is at capacity. Please try a different model.');
+  await settle();
+  assert.equal(tasks.task(first.id).status, 'failed');
+  assert.match(tasks.task(first.id).note, /满载/);
+  say(1, '@副 重试上一件', 'zhu');
+  await settle();
+  assert.equal(tasks.task(first.id).status, 'assigned');
+  assert.equal(tasks.list(1).filter(t => t.owner === 'fu' && t.room_id === 1).length, 1);
+  say(1, '@主 已执行 date，结果是 Fri Nov 13');
+  await settle();
+  assert.equal(tasks.task(first.id).status, 'returned');
+  hub.store.close();
+});
+
+test('model error classifier covers limits, timeout, auth, context and preserves real prose', async () => {
+  const { modelErrorReply } = await import('./model-errors.mjs');
+  for (const [text, kind] of [
+    ['Selected model is at capacity. Please try a different model.', 'capacity'],
+    ['Error: rate limit exceeded', 'quota'],
+    ['request timed out', 'timeout'],
+    ['unexpected status 401 Unauthorized', 'auth'],
+    ['maximum context length is 128000 tokens', 'context'],
+  ]) assert.equal(modelErrorReply(text)?.kind, kind);
+  assert.equal(modelErrorReply('查到原因是 Selected model is at capacity，已经补上重试'), undefined);
+  assert.match(friendlyFailure('stream disconnected before completion'), /超时/);
+});
+
 test('记忆论坛 rework: strict hand-back line, full text kept, unrelated page not picked', async () => {
   const { mkdtempSync, mkdirSync, readFileSync, writeFileSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');

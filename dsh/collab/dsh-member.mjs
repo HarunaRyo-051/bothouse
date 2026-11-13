@@ -7,6 +7,7 @@
 // one that was consumed is settled from the Session log. Nothing is re-sent,
 // so a prompt is executed at most once.
 import { randomUUID } from 'node:crypto';
+import { modelErrorReply } from './model-errors.mjs';
 import { readFileSync, realpathSync, statSync } from 'node:fs';
 import { basename, isAbsolute, relative, sep } from 'node:path';
 import { exitTarget } from './team-exit.mjs';
@@ -201,6 +202,8 @@ const INTERRUPTED = Symbol('interrupted');
 export function friendlyFailure(raw) {
   if (raw?.code === 'COLLAB_CLI_START') return raw.message;
   const text = String(raw);
+  const model = modelErrorReply(text.replace(/^出错了：/, ''));
+  if (model !== undefined) return model.zh;
   if (/no.{0,12}(api.?key|key)|missing.{0,12}(key|credential)|api.?key.{0,12}(missing|not set|required)|未配置.*key/i.test(text)) return '还没有配置模型的 API Key，请先去配置模型。';
   if (/model.{0,30}(not found|unavailable|not available|unsupported)|unknown model|模型.*不可用|404/i.test(text)) return '这个模型暂时不可用，请检查模型名称或换一个模型。';
   // An unreachable provider is a setting or network problem. Echoing the transport wording
@@ -714,6 +717,7 @@ export class DshMembers {
       if (this.closed) return;
       this.hub.quota?.observe(member.id, room.id, { error: text });
       if (!text) { this.fail(job.id, `${member.name} 这一轮没有给出回复（${member.cli} 没有输出文字）`); return; }
+      if (modelErrorReply(text) !== undefined) { this.fail(job.id, text); return; }
       latest = '';
       const reply = this.returnToLead(job, member, text);
       const converted = localImageReply(reply, cwd, this.rt.files, this.rt.logger);
@@ -885,11 +889,14 @@ export class DshMembers {
     }
     this.hub.quota?.observe(job.member_id, job.room_id, { error: String(notice) });
     const error = friendlyFailure(notice);
+    const model = modelErrorReply(String(notice?.message ?? notice));
     this.hub.setError(job.member_id, error);
     this.postFailure(job, error, `dsh-job-${jobId}-${state}-${Date.now()}`, {
       title: '成员出错', state: 'failed', action: 'configure-model', job_id: jobId,
       member_id: job.member_id, trigger_id: job.trigger_id,
+      ...(model === undefined ? {} : { detail: model.raw }),
     });
+    if (model !== undefined) this.hub.tasks?.failOpen?.(job.room_id, job.member_id, error);
   }
 
   postFailure(job, text, clientKey, card) {
