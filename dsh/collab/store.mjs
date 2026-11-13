@@ -169,6 +169,36 @@ export class Store {
     };
   }
 
+  listDemands() {
+    return this.db.prepare('SELECT * FROM demands ORDER BY created_at DESC, id DESC').all();
+  }
+
+  createDemand(fields) {
+    const values = demandFields(fields, false);
+    const now = Date.now() / 1000;
+    return this.db.prepare(`INSERT INTO demands (title, source, why, accept, priority, status, room_id, task_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`).get(
+      values.title, values.source ?? '', values.why ?? '', values.accept ?? '',
+      values.priority ?? 'P2', values.status ?? 'draft', values.room_id ?? null, values.task_id ?? null, now, now);
+  }
+
+  updateDemand(id, fields) {
+    const current = this.db.prepare('SELECT * FROM demands WHERE id = ?').get(id);
+    if (!current) throw new CollabError('not-found', 'demand not found');
+    const values = demandFields(fields, true);
+    const next = { ...current, ...values };
+    return this.db.prepare(`UPDATE demands SET title = ?, source = ?, why = ?, accept = ?, priority = ?, status = ?,
+      room_id = ?, task_id = ?, updated_at = ? WHERE id = ? RETURNING *`).get(
+      next.title, next.source, next.why, next.accept, next.priority, next.status,
+      next.room_id, next.task_id, Date.now() / 1000, id);
+  }
+
+  deleteDemand(id) {
+    const row = this.db.prepare('DELETE FROM demands WHERE id = ? RETURNING *').get(id);
+    if (!row) throw new CollabError('not-found', 'demand not found');
+    return row;
+  }
+
   /**
    * Bring any older database up to date. Idempotent and run on every open: tables and
    * columns are created only when missing, so the version number never gates a column.
@@ -202,6 +232,18 @@ export class Store {
       this.dedupeWorkspaceNames();
       // v9: the tasks table (#139 team mode B), ensured idempotently like the columns above.
       this.ensureTasks();
+      this.db.exec(`CREATE TABLE IF NOT EXISTS demands (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        source TEXT NOT NULL DEFAULT '',
+        why TEXT NOT NULL DEFAULT '',
+        accept TEXT NOT NULL DEFAULT '',
+        priority TEXT NOT NULL DEFAULT 'P2' CHECK (priority IN ('P0', 'P1', 'P2')),
+        status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'ready', 'planned', 'dropped')),
+        room_id INTEGER REFERENCES rooms(id),
+        task_id INTEGER REFERENCES tasks(id),
+        created_at REAL NOT NULL,
+        updated_at REAL NOT NULL)`);
       // 记忆论坛（轻量版）：which memory page a reply said it used. One row per (message, entry).
       this.db.exec(`CREATE TABLE IF NOT EXISTS memory_uses (
         message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
@@ -876,6 +918,35 @@ export class Store {
 
 export class CollabError extends Error {
   constructor(code, message) { super(message); this.code = code; this.name = 'CollabError'; }
+}
+
+function demandFields(input, partial) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new CollabError('invalid', 'demand body must be an object');
+  const fields = {};
+  for (const key of Object.keys(input)) {
+    if (!['title', 'source', 'why', 'accept', 'priority', 'status', 'room_id', 'task_id'].includes(key)) {
+      throw new CollabError('invalid', `unknown demand field: ${key}`);
+    }
+    const value = input[key];
+    if (key === 'title') {
+      if (typeof value !== 'string' || !value.trim()) throw new CollabError('invalid', 'title is required');
+      fields.title = value.trim();
+    } else if (['source', 'why', 'accept'].includes(key)) {
+      if (typeof value !== 'string') throw new CollabError('invalid', `${key} must be a string`);
+      fields[key] = value;
+    } else if (key === 'priority') {
+      if (!['P0', 'P1', 'P2'].includes(value)) throw new CollabError('invalid', 'invalid priority');
+      fields.priority = value;
+    } else if (key === 'status') {
+      if (!['draft', 'ready', 'planned', 'dropped'].includes(value)) throw new CollabError('invalid', 'invalid status');
+      fields.status = value;
+    } else {
+      if (value !== null && (!Number.isSafeInteger(value) || value <= 0)) throw new CollabError('invalid', `${key} must be a positive id or null`);
+      fields[key] = value;
+    }
+  }
+  if (!partial && !fields.title) throw new CollabError('invalid', 'title is required');
+  return fields;
 }
 
 function clampLimit(limit) {
