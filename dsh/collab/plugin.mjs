@@ -211,6 +211,8 @@ export async function apply(ctx, rawConfig) {
       return refuse(req, res);
     }
     if (path === '/collab' && req.method === 'GET') return text(res, 200, 'text/html; charset=utf-8', PAGE);
+    const demandReply = demandsRoute(req, res, path, store);
+    if (demandReply !== undefined) return demandReply;
     if (path === '/collab/api/personas' && req.method === 'GET') return json(res, 200, personaLibrary(url.searchParams.get('lang') ?? 'zh'));
     if (path === '/collab/api/state' && req.method === 'GET') {
       return json(res, 200, { me: OWNER, lead_id: hub.selectedPrimaryMember()?.id ?? null,
@@ -656,7 +658,23 @@ function ticketWorkspace(req, res, roomId, { store, hub, gateway, later, tasks, 
   });
 }
 
-const ERROR_STATUS = { 'room-missing': 404, 'member-missing': 404, 'task-missing': 404, conflict: 409, 'read-only': 403, forbidden: 403, offline: 503, 'member-busy': 409 };
+const ERROR_STATUS = { 'not-found': 404, 'room-missing': 404, 'member-missing': 404, 'task-missing': 404, conflict: 409, 'read-only': 403, forbidden: 403, offline: 503, 'member-busy': 409 };
+
+export function demandsRoute(req, res, path, store) {
+  if (path === '/collab/api/demands') {
+    if (req.method === 'GET') return json(res, 200, { demands: store.listDemands() });
+    if (req.method === 'POST') return withBody(req, res, body => ({ demand: store.createDemand(body) }));
+  }
+  const match = /^\/collab\/api\/demands\/(\d+)$/.exec(path);
+  if (!match) return undefined;
+  const id = Number(match[1]);
+  if (req.method === 'PATCH') return withBody(req, res, body => ({ demand: store.updateDemand(id, body) }));
+  if (req.method === 'DELETE') return withBody(req, res, () => {
+    store.deleteDemand(id);
+    return { ok: true };
+  }, false);
+  return undefined;
+}
 
 /** Parse a JSON body (unless `parse` is false), run fn, and map CollabError codes to HTTP statuses. */
 class BodyTooLarge extends Error {}
