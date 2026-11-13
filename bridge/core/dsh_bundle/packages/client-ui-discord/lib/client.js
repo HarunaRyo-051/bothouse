@@ -1,4 +1,4 @@
-// dsh-client-source-sha256: cc6a09c70678898e29479eb21d48ca50976f17c9aaa03c0b5e239f4fe8a7c1d8
+// dsh-client-source-sha256: 7eababa03a94d3ecbdf1af867e8c2aa74d84e6dca5b34407984c9a9317362a90
 // dsh-style-sha256: 5c59f4258d53d055c971e8c0c35cde08f0466d02ce60055632a51c23fe10c2cf
 window.__ModuleLoader__.load({
  id: "@deepseek-ai/dsh-experimental-client-ui-discord",
@@ -19273,7 +19273,7 @@ function Quote({ quote, t }) {
 * card_view_pref.go), default 简略 as there (cardViewDefault).
 */
 /** A progress brief: 「第 3 步 · 1分15秒」 on top, then one chip per tool and its state. */
-function BriefChips({ brief }) {
+function BriefChips({ brief, state }) {
 	const lines = brief.split("\n").map((line) => line.trim()).filter(Boolean);
 	if (lines.length === 0) return null;
 	const [head, ...rest] = lines;
@@ -19292,6 +19292,10 @@ function BriefChips({ brief }) {
 			state
 		});
 	}
+	if (state === "completed" && chips.length <= 1) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+		className: ChannelsPage_module_default.briefHead,
+		children: head
+	});
 	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 		className: ChannelsPage_module_default.briefWrap,
 		children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
@@ -19536,7 +19540,10 @@ function MessageRow({ message, member, t, onConfigure, menuOpen, onAvatar, onClo
 									}, view))
 								})]
 							}),
-							briefOnly ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(BriefChips, { brief: shown }) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+							briefOnly ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(BriefChips, {
+								brief: shown,
+								state: card?.state
+							}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 								className: ChannelsPage_module_default.text,
 								children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.MarkdownText, {
 									text: markdown,

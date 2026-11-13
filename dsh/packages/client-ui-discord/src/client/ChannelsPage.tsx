@@ -75,7 +75,7 @@ function Quote({ quote, t }: { quote: ChannelQuote; t: T }) {
  * card_view_pref.go), default 简略 as there (cardViewDefault).
  */
 /** A progress brief: 「第 3 步 · 1分15秒」 on top, then one chip per tool and its state. */
-function BriefChips({ brief }: { brief: string }) {
+function BriefChips({ brief, state }: { brief: string; state?: string }) {
   const lines = brief.split('\n').map(line => line.trim()).filter(Boolean)
   if (lines.length === 0) return null
   const [head, ...rest] = lines
@@ -94,6 +94,9 @@ function BriefChips({ brief }: { brief: string }) {
       chips.push({ text: line, count: 1, state })
     }
   }
+  // A *finished* run with zero or one step says nothing the header does not; while it is still
+  // running that single row is exactly what the reader is waiting on.
+  if (state === 'completed' && chips.length <= 1) return <span className={css.briefHead}>{head}</span>
   return (
     <div className={css.briefWrap}>
       <span className={css.briefHead}>{head}</span>
@@ -253,7 +256,7 @@ function MessageRow({ message, member, t, onConfigure, menuOpen, onAvatar, onClo
                     </div>
                   )}
                 </div>
-                {briefOnly ? <BriefChips brief={shown} /> : <div className={css.text}><MarkdownText text={markdown} labels={labels} /></div>}
+                {briefOnly ? <BriefChips brief={shown} state={card?.state} /> : <div className={css.text}><MarkdownText text={markdown} labels={labels} /></div>}
                 {(card.state === 'failed' || card.action === 'configure-model') && (
                   <div className={css.cardButtons}>
                     {card.state !== 'retried' && (
