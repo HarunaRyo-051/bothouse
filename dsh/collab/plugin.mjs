@@ -120,7 +120,7 @@ export async function apply(ctx, rawConfig) {
   const gateway = new CloudWebGateway(hub, { token: config.botToken, logger: ctx.logger, files });
   const later = new Later(hub, join(config.dataDir, 'collab.sqlite3'), (id, msg) => dsh.nudge(id, msg) || gateway.nudge(id, msg), { start: false });
   gateway.later = later;
-  const dsh = new DshMembers(hub, { files, later, ctx, createUserMessage, createCliMember, workspacePath: config.workspacePath, logger: ctx.logger }, [], { maxRelay: config.maxRelay });
+  const dsh = new DshMembers(hub, { files, later, ctx, createUserMessage, createCliMember, workspacePath: config.workspacePath, dataDir: config.dataDir, logger: ctx.logger }, [], { maxRelay: config.maxRelay });
   const avatarUploads = new AvatarUploads(join(config.dataDir, 'avatars'));
   const roster = new Roster(hub, dsh, ctx.llm, avatarUploads);
   // #139 B: dispatched tasks; a reminder wakes its owner whichever kind of member it is.

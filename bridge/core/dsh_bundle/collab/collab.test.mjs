@@ -6303,3 +6303,28 @@ test('记忆论坛: a turn carries only the pages that match, and a reply that c
   forum.write('ds', { name: '新教训', description: '更新后的描述' });
   assert.equal(forum.entries('ds').filter(e => e.name === '新教训').length, 1);
 });
+
+test('记忆论坛 rework: strict hand-back line, full text kept, unrelated page not picked', async () => {
+  const { mkdtempSync, mkdirSync, readFileSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { MemoryForum } = await import('./memory-forum.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'mem2-'));
+  const forum = new MemoryForum({ dataDir: dir });
+  const page = (id, name, description) => {
+    mkdirSync(join(dir, 'roles', 'ds', 'wiki', 'memory'), { recursive: true });
+    writeFileSync(join(dir, 'roles', 'ds', 'wiki', 'memory', `${id}.md`), `---\nname: ${name}\ndescription: ${description}\n---\n`);
+  };
+  page('danger', '不要删除生产数据库', '删库前必须确认');
+  // One shared bigram (不要) is not relevance.
+  assert.deepEqual(forum.select('ds', '今天不要吃辣'), []);
+  // The page's own name in the message is.
+  assert.deepEqual(forum.select('ds', '记得不要删除生产数据库').map(e => e.id), ['danger']);
+  // 做了什么 inside another part is not the summary line.
+  assert.equal(/^做了什么[ \t　]*[：:][ \t　]*(.+)$/m.exec('要你做的：请阅读示例 做了什么：误收内容'), null);
+  assert.equal(/^做了什么[ \t　]*[：:][ \t　]*(.+)$/m.exec('做了什么：修好了徽标')?.[1], '修好了徽标');
+  // The page keeps the whole summary, not its first 40 characters.
+  const long = '修好了实时徽标和交回抽取，并且把完整的结论都保留下来，尾巴不能被截掉';
+  const written = forum.write('ds', { name: '徽标修复', description: long });
+  assert.equal(written.description.length, Math.min(long.length, 160));
+  assert.match(readFileSync(join(dir, 'roles', 'ds', 'wiki', 'memory', '徽标修复.md'), 'utf8'), /尾巴不能被截掉/);
+});

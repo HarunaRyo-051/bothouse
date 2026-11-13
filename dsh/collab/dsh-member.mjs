@@ -59,7 +59,7 @@ export function memberStatus(hub, tasks = hub?.tasks, roomId) {
   }).join('\n');
 }
 import { mentions, nameCalled, split } from './mentions.mjs';
-import { quotePrefix } from './store.mjs';
+import { publicMessage, quotePrefix } from './store.mjs';
 import { progressCardOf } from './cloudweb.mjs';
 import { attachmentBlocks, namedAttachmentBlocks, nativeAttachmentBlocks, undeliveredReasonZh } from './attachments.mjs';
 
@@ -827,6 +827,7 @@ export class DshMembers {
       authorKind: 'role', author: member.id, name: member.name, clientKey: `dsh-job-${job.id}`,
       text: converted.text, attachments: converted.attachments,
     });
+    this.noteMemoryUse(member, this.store.room(job.room_id), message);
     this.store.finishJob(job.id, 'done', message.id);
     return complete;
   }

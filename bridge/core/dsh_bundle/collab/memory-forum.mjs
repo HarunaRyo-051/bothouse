@@ -38,8 +38,9 @@ const terms = text => {
 
 export class MemoryForum {
   /** @param options - { dataDir: the collab data dir (~/.conest-collab); home fallback }. */
-  constructor({ dataDir = process.env.CONEST_DATA_DIR } = {}) {
+  constructor({ dataDir = process.env.CONEST_DATA_DIR, logger } = {}) {
     this.dataDir = String(dataDir ?? '').trim();
+    this.logger = logger;
     /** `${member}\0${room}` -> entries handed to this turn, so a reply can say which it used. */
     this.turnEntries = new Map();
   }
@@ -74,9 +75,11 @@ export class MemoryForum {
     const scored = [];
     for (const entry of this.entries(member)) {
       const own = terms(`${entry.name} ${entry.description}`);
-      let score = 0
+      let score = 0;
       for (const term of own) if (said.has(term)) score += 1;
-      if (score > 0) scored.push({ entry, score });
+      // One shared bigram picked "不要删除生产数据库" for 「不要吃辣」: require two, or the page's own
+      // name appearing in the message.
+      if (score >= 2 || (entry.name.length >= 2 && String(text ?? '').includes(entry.name))) scored.push({ entry, score });
     }
     return scored.sort((a, b) => b.score - a.score).slice(0, limit).map(row => row.entry);
   }
@@ -111,8 +114,11 @@ export class MemoryForum {
     if (!clean) return undefined;
     mkdirSync(dir, { recursive: true });
     const id = clean.replace(/[\\/:*?"<>|\s]+/g, '-').replace(/^-+|-+$/g, '') || 'memory';
-    const body = `---\nname: ${clean}\ndescription: ${String(description ?? '').trim().slice(0, MAX_DESC)}\n---\n\n${clean}\n`;
+    const detail = String(description ?? '').trim();
+    const summary = detail.slice(0, MAX_DESC);
+    // The page keeps the whole thing: a lesson cut at 40 characters lost its conclusion.
+    const body = `---\nname: ${clean}\ndescription: ${summary}\n---\n\n${clean}\n${detail ? `\n${detail}\n` : ''}`;
     writeFileSync(join(dir, `${id}.md`), body);
-    return { id, name: clean, description: String(description ?? '').trim().slice(0, MAX_DESC) };
+    return { id, name: clean, description: summary };
   }
 }
