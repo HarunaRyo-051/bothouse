@@ -1945,3 +1945,7 @@
   margin-top: 6px;
   display: flex;
 }
+
+.dshc_briefChip[data-state="failed"] {
+  background: #ef444429;
+}

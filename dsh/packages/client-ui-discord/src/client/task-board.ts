@@ -22,6 +22,11 @@ export const BOARD_TABS: readonly { id: string; label: keyof typeof zh; statuses
   { id: 'review', label: 'taskTabReview', statuses: ['returned', 'declined', 'escalated'] },
   { id: 'done', label: 'taskTabDone', statuses: ['done', 'cancelled', 'superseded'] },
 ]
+/** Live work on the owner's side, for Activity and the busy marks: open and not parked
+ * (paused_at), the same rule the board uses to move a task out of 在做. */
+const LIVE: readonly TaskStatus[] = ['assigned', 'accepted', 'asked', 'rework']
+export const isLiveTask = (task: ChannelTask): boolean => task.paused_at == null && LIVE.includes(task.status)
+
 const groupOf = (status: TaskStatus): number => BOARD_TABS.findIndex(g => g.statuses.includes(status))
 
 /** Board rows, grouped as above and newest first inside a group. */

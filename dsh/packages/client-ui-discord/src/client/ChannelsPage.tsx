@@ -14,6 +14,7 @@ import { MAX_MESSAGE_BODY, messageTooLarge } from './channel-source.ts'
 import { AttachmentList, PendingAttachments, useComposerAttachments } from './Attachments.tsx'
 import { groupRooms } from './channel-source.ts'
 import { TaskBoard, TaskCard } from './TaskBoard.tsx'
+import { isLiveTask } from './task-board.ts'
 import { AskInbox } from './AskInbox.tsx'
 import { ProgressCard } from './ProgressCard.tsx'
 import { CapabilityList } from './CapabilityList.tsx'
@@ -77,11 +78,30 @@ function Quote({ quote, t }: { quote: ChannelQuote; t: T }) {
 function BriefChips({ brief }: { brief: string }) {
   const lines = brief.split('\n').map(line => line.trim()).filter(Boolean)
   if (lines.length === 0) return null
-  const [head, ...chips] = lines
+  const [head, ...rest] = lines
+  // Consecutive bash rows are one row with a count: five 「🔧 Bash」 lines said nothing a
+  // "×5" does not, and a failed or still-running one must not be hidden by a later success.
+  const chips: { text: string; count: number; state: string }[] = []
+  for (const line of rest) {
+    const tool = /▶|🔧|✅|❌/.test(line) ? line.replace(/^[^A-Za-z\u4e00-\u9fa5]*/, '').split(/[ —·]/)[0] : ''
+    const state = line.includes('❌') ? 'failed' : line.includes('🔧') || line.includes('▶') ? 'running' : line.includes('✅') ? 'ok' : 'unknown'
+    const previous = chips.at(-1)
+    if (/bash/i.test(tool) && previous !== undefined && /bash/i.test(previous.text)) {
+      previous.count += 1
+      if (state === 'failed' || (state === 'running' && previous.state === 'ok')) previous.state = state
+      else if (previous.state !== 'failed' && previous.state === 'unknown') previous.state = state
+    } else {
+      chips.push({ text: line, count: 1, state })
+    }
+  }
   return (
     <div className={css.briefWrap}>
       <span className={css.briefHead}>{head}</span>
-      {chips.length > 0 && <span className={css.briefChips}>{chips.map((line, index) => <span key={index} className={css.briefChip}>{line}</span>)}</span>}
+      {chips.length > 0 && <span className={css.briefChips}>{chips.map((chip, index) => (
+        <span key={index} className={css.briefChip} data-state={chip.state === 'failed' ? 'failed' : undefined}>
+          {chip.count > 1 && /bash/i.test(chip.text) ? `${chip.text.replace(/×\d+$/, '')} ×${chip.count}` : chip.text}
+        </span>
+      ))}</span>}
     </div>
   )
 }
@@ -471,9 +491,9 @@ export function ChannelsPage({ useChannels, selectRoom, send, reviewTask, reloca
   const channelId = room?.parent_id ?? room?.id
   const visibleMembers = state.members.filter(m => !m.rooms?.length || (channelId !== undefined && m.rooms.includes(channelId)))
     .map(m => ({ ...m, noDispatch: channelId === undefined ? m.noDispatch : state.noDispatchByRoom?.[channelId]?.[m.id] ?? m.noDispatch }))
-  const openTaskOwners = new Set(
-    (state.tasks ?? []).filter(t => ['assigned', 'accepted', 'asked', 'rework'].includes(t.status)).map(t => t.owner)
-  )
+  // A parked task (paused_at) is waiting for someone to resume it, not work in flight: it must not
+  // make its owner look busy in Activity or in the member list.
+  const openTaskOwners = new Set((state.tasks ?? []).filter(isLiveTask).map(t => t.owner))
   const busy = new Set([
     ...(state.roomId === undefined ? [] : state.thinking[String(state.roomId)] ?? []),
     ...openTaskOwners,
