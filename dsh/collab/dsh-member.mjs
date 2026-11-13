@@ -834,6 +834,12 @@ export class DshMembers {
     }
     const kind = reason?.kind;
     const complete = kind === undefined || kind === 'completed' || kind === 'max-tokens';
+    if ((!complete && kind !== 'aborted') || modelErrorReply(text) !== undefined) {
+      const detail = complete || kind === 'aborted' ? text : String(reason?.error?.message ?? describeReason(reason));
+      this.fail(job.id, detail);
+      if (modelErrorReply(detail) === undefined) this.hub.tasks?.failOpen?.(job.room_id, member.id, friendlyFailure(detail));
+      return false;
+    }
     const reply = this.returnToLead(job, member, complete ? text : `${text}\n\n（这一轮没有正常结束：${describeReason(reason)}）`);
     const cwd = this.store.workspacePath(job.room_id, this.rt.workspacePath);
     const converted = localImageReply(reply, cwd, this.rt.files, this.rt.logger);

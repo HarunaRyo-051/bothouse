@@ -6373,6 +6373,36 @@ test('model-only errors fail open work without hand-back, and the next call retr
   hub.store.close();
 });
 
+test('native finish fails partial timeout and error-only completion with raw failure cards', async () => {
+  const { hub, tasks, say } = g34Setup();
+  const members = Object.create(DshMembers.prototype);
+  members.hub = hub;
+  members.store = hub.store;
+  members.rt = { workspacePath: '', files: undefined, logger: quiet };
+  members.memoryForum = { cited: () => [] };
+  const member = { id: 'fu', name: '副' };
+  for (const [events, reason, raw] of [
+    [[{ type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '正在检查' }] } } }],
+      { kind: 'error', error: { message: 'request timed out' } }, 'request timed out'],
+    [[{ type: 'assistant/message', data: { message: { content: [{ type: 'text', text: 'Selected model is at capacity. Please try a different model.' }] } } }],
+      { kind: 'completed' }, 'Selected model is at capacity. Please try a different model.'],
+    [[], { kind: 'error', error: { message: 'unexpected status 401 Unauthorized' } }, 'unexpected status 401 Unauthorized'],
+  ]) {
+    const trigger = say(1, '@副 做一次检查', 'zhu');
+    await settle();
+    const task = tasks.list(1).find(t => t.owner === 'fu' && t.status === 'assigned');
+    const job = hub.store.addJob('fu', 1, trigger.id);
+    assert.equal(members.finish(job, member, { events, reason }), false);
+    await settle();
+    assert.equal(hub.store.job(job.id).state, 'failed');
+    assert.equal(tasks.task(task.id).status, 'failed');
+    const rows = hub.store.page(1, undefined, 100);
+    assert.equal(rows.filter(m => m.author === 'fu' && m.id > trigger.id).length, 0);
+    assert.ok(rows.some(m => JSON.parse(m.card ?? 'null')?.detail?.includes(raw)), `raw failure detail: ${raw}`);
+  }
+  hub.store.close();
+});
+
 test('model error classifier covers limits, timeout, auth, context and preserves real prose', async () => {
   const { modelErrorReply } = await import('./model-errors.mjs');
   for (const [text, kind] of [
