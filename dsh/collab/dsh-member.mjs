@@ -756,8 +756,14 @@ export class DshMembers {
     // 记忆论坛（轻量版）：every turn gets the pages that match what called it, not just a new context.
     const picked = this.memoryForum.select(member.id, trigger?.text ?? '');
     this.memoryForum.remember(member.id, room.id, picked);
+    const task = this.store.db.prepare(`SELECT platform_id FROM tasks WHERE room_id = ? AND owner = ?
+      AND status IN ('assigned', 'accepted', 'asked', 'rework') ORDER BY id DESC LIMIT 1`).get(room.id, member.id);
+    const platform = task?.platform_id == null ? null : this.store.platform(task.platform_id);
+    const platformBlock = task === undefined ? '' : platform
+      ? `本次事项平台：${platform.name}。`
+      : '本次未指定平台，不得引用任何平台规则，只能查公共规范并说明待确认。';
     return {
-      block: [memory.block, gate.block, this.memoryForum.block(picked)].filter(Boolean).join('\n\n'),
+      block: [memory.block, gate.block, platformBlock, this.memoryForum.block(picked)].filter(Boolean).join('\n\n'),
       commit: () => { memory.commit(); gate.commit(); },
     };
   }

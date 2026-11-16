@@ -126,6 +126,7 @@ export class Tasks {
         VALUES (?, ?, ?, ?, ?, 'assigned', ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`),
       // The last ? keeps (1) or drops (0) an undelivered reminder: only 接/问 stay the owner's turn.
       // A resumed (was paused) task starts a fresh watch: renewals back to 0 (rework: resetRenewals).
+      updatePlatform: this.db.prepare('UPDATE tasks SET platform_id = ? WHERE id = ? RETURNING *'),
       set: this.db.prepare(`UPDATE tasks SET status = ?, paused_at = NULL, next_check_at = ?, note = ?, updated_at = ?, remind_msg_id = CASE WHEN ? THEN remind_msg_id END,
         renewals = CASE WHEN paused_at IS NOT NULL THEN 0 ELSE renewals END WHERE id = ? AND status = ? RETURNING *`),
       handBack: this.db.prepare(`UPDATE tasks SET status = 'returned', paused_at = NULL, next_check_at = NULL, remind_msg_id = NULL, result_msg_id = ?, returned_at = ?, updated_at = ?
@@ -198,6 +199,14 @@ export class Tasks {
 
   task(id) { return this.q.get.get(id); }
 
+  setPlatform(id, platformId) {
+    const task = this.mustTask(id);
+    if (platformId != null && !this.store.platform(platformId)) throw new CollabError('invalid', `unknown platform ${platformId}`);
+    const row = this.q.updatePlatform.get(platformId ?? null, id);
+    this.record(row, 'platform', `#${id}「${row.title}」平台归属：${platformId ?? '未指定'}`);
+    return this.changed(id);
+  }
+
   /** The chat channel a room belongs to (itself unless it is a workspace). */
   chatOf(roomId) {
     const room = this.store.room(roomId);
@@ -235,6 +244,7 @@ export class Tasks {
       // Who is expected to review this hand-back when its dispatcher was busy at hand-back time.
       reviewer: t.reviewer ?? null, reviewer_name: t.reviewer == null ? null : this.nameOf(t.reviewer),
       platform_id: t.platform_id ?? null,
+      prompt_constraint: t.platform_id == null ? '本次未指定平台，不得引用任何平台规则，只能查公共规范并说明待确认。' : `本次事项平台：${this.store.platform(t.platform_id)?.name ?? t.platform_id}。`,
     };
   }
 
