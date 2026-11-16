@@ -22,17 +22,19 @@ function Status({ status, t }: { status: TaskStatus; t: T }) {
  * Right-column board for the selected chat channel.
  * @param onOpen - jump to a message in a room (dispatch or delivery).
  */
-export function TaskBoard({ tasks, rooms, chatId, roomId, t, onOpen, onReview, onRelocate, onTerminate }: {
+export function TaskBoard({ tasks, rooms, chatId, roomId, platforms = [], t, onOpen, onReview, onRelocate, onTerminate, onPlatformChange }: {
   tasks: readonly ChannelTask[]
   rooms: readonly ChannelRoom[]
   chatId: number | undefined
   roomId: number | undefined
+  platforms: readonly { id: string; name: string }[]
   t: T
   onOpen: (roomId: number, messageId: number) => void
   onReview?: (id: number, verdict: 'done' | 'rework', note?: string) => Promise<void>
   /** End a task without a review. Always asks for a reason first. */
   onTerminate?: (id: number, reason: string) => Promise<void>
   onRelocate?: (id: number) => Promise<void>
+  onPlatformChange?: (id: number, platformId: string | null) => Promise<void>
 }) {
   const [opened, setOpened] = useState(false)
   const [selectedTab, setSelectedTab] = useState(BOARD_TABS.find(tab => tab.initial)!.id)
@@ -99,6 +101,10 @@ export function TaskBoard({ tasks, rooms, chatId, roomId, t, onOpen, onReview, o
         <Status status={task.status} t={t} />
       </div>
       <div className={css.taskMeta}>
+        {onPlatformChange !== undefined && <label>平台<select aria-label={`#${task.id} 平台`} disabled={saving} value={task.platform_id ?? ''} onChange={event => {
+          setSaving(true); setError(undefined)
+          void onPlatformChange(task.id, event.target.value || null).catch(error => { setError(error instanceof Error ? error.message : String(error)) }).finally(() => { setSaving(false) })
+        }}><option value="">未指定</option>{platforms.map(platform => <option key={platform.id} value={platform.id}>{platform.name}</option>)}</select></label>}
         <span>{task.owner_name}</span>
         <span>{t('taskElapsed', { d: formatDuration(elapsed(task, now), t) })}</span>
         {task.next_check_at !== null && <span>{t('taskNextCheck', { time: clock(task.next_check_at) })}</span>}

@@ -254,6 +254,7 @@ export interface ChannelTask {
   readonly returned_at: number | null
   readonly paused_at?: number | null
   readonly paused_chat?: number | null
+  readonly platform_id?: string | null
 }
 
 /** One message the human sent that the service has not confirmed yet. */
@@ -332,6 +333,7 @@ export interface ChannelSnapshot {
 export interface ChannelActions {
   answerAsk(id: string, text: string): Promise<void>
   reviewTask(id: number, verdict: 'done' | 'rework', note?: string): Promise<void>
+  updateTaskPlatform(id: number, platformId: string | null): Promise<void>
   /** End a task without a review: the owner or the dispatcher, always with a reason. */
   terminateTask(id: number, reason: string): Promise<void>
   relocateTask(id: number): Promise<void>
@@ -878,6 +880,10 @@ export function createChannelSource(transport: ChannelTransport): {
         asksVersion.set(roomId, (asksVersion.get(roomId) ?? 0) + 1)
         set({ asks })
       }
+    },
+    async updateTaskPlatform(id, platformId) {
+      const { task } = await request<{ task: ChannelTask }>(`collab/api/tasks/${id}/platform`, json('PATCH', { platform_id: platformId }))
+      set({ tasks: (snapshot.tasks ?? []).map(row => row.id === task.id ? task : row) })
     },
     async reviewTask(id, verdict, note) {
       const { task } = await request<{ task: ChannelTask }>(`collab/api/tasks/${id}/review`, json('POST', { verdict, note }))

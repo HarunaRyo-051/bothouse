@@ -14,6 +14,7 @@ import { MAX_MESSAGE_BODY, messageTooLarge } from './channel-source.ts'
 import { AttachmentList, PendingAttachments, useComposerAttachments } from './Attachments.tsx'
 import { groupRooms } from './channel-source.ts'
 import { TaskBoard, TaskCard } from './TaskBoard.tsx'
+import { loadPlatforms, type PlatformOption } from './platforms.ts'
 import { isLiveTask } from './task-board.ts'
 import { AskInbox } from './AskInbox.tsx'
 import { ProgressCard } from './ProgressCard.tsx'
@@ -347,6 +348,12 @@ function MemberGroup({ title, members, busy, onPick, onEdit, onRemove, t }: {
  */
 export function ChannelsPage({ useChannels, selectRoom, send, reviewTask, relocateTask, terminateTask, answerAsk, createRoom, renameRoom, listModels, listClis, listPersonas, addMember, updateMember, removeMember, setNoDispatch, getNoDispatch, replaceNoDispatch, setLead, setWorkspacePath, renewRoom, setDispatchMode, setMaxRelay, decidePermission, retryMessage, editMessage, withdrawMessage, openModelSettings, t }: ChannelsPageProps) {
   const state = useChannels(snapshot => snapshot)
+  const [platforms, setPlatforms] = useState<readonly PlatformOption[]>([])
+  useEffect(() => {
+    let active = true
+    void loadPlatforms().then(rows => { if (active) setPlatforms(rows) }).catch(() => { if (active) setPlatforms([]) })
+    return () => { active = false }
+  }, [])
   // #148: the own message being edited, and the last edit/withdraw outcome to show.
   const [editing, setEditing] = useState<{ id: number; text: string } | undefined>(undefined)
   const [ownNotice, setOwnNotice] = useState<string | undefined>(undefined)
@@ -897,7 +904,7 @@ export function ChannelsPage({ useChannels, selectRoom, send, reviewTask, reloca
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9.5 3-.7 2.3-2 .9-2.2-.6-2.5 4.3 1.6 1.7v2.3l-1.6 1.7 2.5 4.3 2.2-.6 2 .9.7 2.3h5l.7-2.3 2-.9 2.2.6 2.5-4.3-1.6-1.7v-2.3l1.6-1.7-2.5-4.3-2.2.6-2-.9L14.5 3Z" /><circle cx="12" cy="12.75" r="3" /></svg>
           {t('channelSettings')}
         </button>
-        <TaskBoard tasks={state.tasks ?? []} rooms={state.rooms} chatId={state.taskChat} roomId={state.roomId} t={t} onOpen={openMessage} onReview={reviewTask} onRelocate={relocateTask} onTerminate={terminateTask} />
+        <TaskBoard tasks={state.tasks ?? []} rooms={state.rooms} chatId={state.taskChat} roomId={state.roomId} platforms={platforms} t={t} onOpen={openMessage} onReview={reviewTask} onRelocate={relocateTask} onTerminate={terminateTask} onPlatformChange={state.updateTaskPlatform} />
         <button type="button" className={css.addMemberButton} onClick={() => { setDrawer(undefined); setDialog(null) }}>+ {t('addMember')}</button>
         {memberError !== undefined && <div className={css.sendError} role="alert">{memberError}</div>}
         <hr className={css.memberListDivider} />

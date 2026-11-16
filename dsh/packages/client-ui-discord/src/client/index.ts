@@ -47,6 +47,7 @@ export function apply(ctx: ClientContext): void {
     selectRoom: channels.actions.selectRoom,
     send: channels.actions.send,
     reviewTask: channels.actions.reviewTask,
+    updateTaskPlatform: channels.actions.updateTaskPlatform,
     relocateTask: channels.actions.relocateTask,
     terminateTask: channels.actions.terminateTask,
     answerAsk: channels.actions.answerAsk,

@@ -1,4 +1,4 @@
-// dsh-client-source-sha256: e4ddc1061e729176f711c0d073c73f5fb3c7f1b990184f908a3e357364bd4ea6
+// dsh-client-source-sha256: 620ac5b5aa7223c0a80229c1e55dd9147e73c08e57c6a42f867359f85debe3b8
 // dsh-style-sha256: 96f0046d930849d4d316bd118c14c9ff6f4d06ad164a6df43f3adb147116959d
 window.__ModuleLoader__.load({
  id: "@deepseek-ai/dsh-experimental-client-ui-discord",
@@ -638,6 +638,10 @@ function createChannelSource(transport) {
 					asksVersion.set(roomId, (asksVersion.get(roomId) ?? 0) + 1);
 					set({ asks });
 				}
+			},
+			async updateTaskPlatform(id, platformId) {
+				const { task } = await request(`collab/api/tasks/${id}/platform`, json("PATCH", { platform_id: platformId }));
+				set({ tasks: (snapshot.tasks ?? []).map((row) => row.id === task.id ? task : row) });
 			},
 			async reviewTask(id, verdict, note) {
 				const { task } = await request(`collab/api/tasks/${id}/review`, json("POST", {
@@ -17229,7 +17233,7 @@ function Status({ status, t }) {
 * Right-column board for the selected chat channel.
 * @param onOpen - jump to a message in a room (dispatch or delivery).
 */
-function TaskBoard({ tasks, rooms, chatId, roomId, t, onOpen, onReview, onRelocate, onTerminate }) {
+function TaskBoard({ tasks, rooms, chatId, roomId, platforms = [], t, onOpen, onReview, onRelocate, onTerminate, onPlatformChange }) {
 	const [opened, setOpened] = (0, react.useState)(false);
 	const [selectedTab, setSelectedTab] = (0, react.useState)(BOARD_TABS.find((tab) => tab.initial).id);
 	const [reviewing, setReviewing] = (0, react.useState)();
@@ -17317,6 +17321,27 @@ function TaskBoard({ tasks, rooms, chatId, roomId, t, onOpen, onReview, onReloca
 			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 				className: ChannelsPage_module_default.taskMeta,
 				children: [
+					onPlatformChange !== void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", { children: ["平台", /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("select", {
+						"aria-label": `#${task.id} 平台`,
+						disabled: saving,
+						value: task.platform_id ?? "",
+						onChange: (event) => {
+							setSaving(true);
+							setError(void 0);
+							onPlatformChange(task.id, event.target.value || null).catch((error) => {
+								setError(error instanceof Error ? error.message : String(error));
+							}).finally(() => {
+								setSaving(false);
+							});
+						},
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+							value: "",
+							children: "未指定"
+						}), platforms.map((platform) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+							value: platform.id,
+							children: platform.name
+						}, platform.id))]
+					})] }),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: task.owner_name }),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: t("taskElapsed", { d: formatDuration(elapsed(task, now), t) }) }),
 					task.next_check_at !== null && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: t("taskNextCheck", { time: clock(task.next_check_at) }) }),
@@ -17625,6 +17650,12 @@ function TaskCard({ taskId, tasks, t }) {
 			}, m.id))
 		})]
 	});
+}
+// src/client/platforms.ts
+async function loadPlatforms(fetcher = fetch) {
+	const response = await fetcher("/collab/api/platforms");
+	if (!response.ok) throw new Error(`平台列表读取失败：${response.status}`);
+	return (await response.json()).platforms ?? [];
 }
 // src/client/AskInbox.tsx
 function Preview({ text, t }) {
@@ -19689,6 +19720,18 @@ function MemberGroup({ title, members, busy, onPick, onEdit, onRemove, t }) {
 */
 function ChannelsPage({ useChannels, selectRoom, send, reviewTask, relocateTask, terminateTask, answerAsk, createRoom, renameRoom, listModels, listClis, listPersonas, addMember, updateMember, removeMember, setNoDispatch, getNoDispatch, replaceNoDispatch, setLead, setWorkspacePath, renewRoom, setDispatchMode, setMaxRelay, decidePermission, retryMessage, editMessage, withdrawMessage, openModelSettings, t }) {
 	const state = useChannels((snapshot) => snapshot);
+	const [platforms, setPlatforms] = (0, react.useState)([]);
+	(0, react.useEffect)(() => {
+		let active = true;
+		loadPlatforms().then((rows) => {
+			if (active) setPlatforms(rows);
+		}).catch(() => {
+			if (active) setPlatforms([]);
+		});
+		return () => {
+			active = false;
+		};
+	}, []);
 	const [editing, setEditing] = (0, react.useState)(void 0);
 	const [ownNotice, setOwnNotice] = (0, react.useState)(void 0);
 	const [drafts, setDrafts] = (0, react.useState)({});
@@ -20523,11 +20566,13 @@ function ChannelsPage({ useChannels, selectRoom, send, reviewTask, relocateTask,
 						rooms: state.rooms,
 						chatId: state.taskChat,
 						roomId: state.roomId,
+						platforms,
 						t,
 						onOpen: openMessage,
 						onReview: reviewTask,
 						onRelocate: relocateTask,
-						onTerminate: terminateTask
+						onTerminate: terminateTask,
+						onPlatformChange: state.updateTaskPlatform
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
 						type: "button",
@@ -21143,6 +21188,7 @@ function apply(ctx) {
 		selectRoom: channels.actions.selectRoom,
 		send: channels.actions.send,
 		reviewTask: channels.actions.reviewTask,
+		updateTaskPlatform: channels.actions.updateTaskPlatform,
 		relocateTask: channels.actions.relocateTask,
 		terminateTask: channels.actions.terminateTask,
 		answerAsk: channels.actions.answerAsk,
