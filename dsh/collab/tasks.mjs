@@ -122,8 +122,8 @@ export class Tasks {
       get: this.db.prepare('SELECT * FROM tasks WHERE id = ?'),
       byMessage: this.db.prepare('SELECT id FROM tasks WHERE assign_msg_id = ? ORDER BY id LIMIT 1'),
       byTitle: this.db.prepare("SELECT id FROM tasks WHERE room_id = ? AND title = ? AND status <> 'done' ORDER BY id LIMIT 1"),
-      add: this.db.prepare(`INSERT INTO tasks (room_id, parent_task, title, owner, created_by, status, next_check_at, assign_msg_id, created_at, updated_at, reason, ref, base)
-        VALUES (?, ?, ?, ?, ?, 'assigned', ?, ?, ?, ?, ?, ?, ?) RETURNING *`),
+      add: this.db.prepare(`INSERT INTO tasks (room_id, parent_task, title, owner, created_by, status, next_check_at, assign_msg_id, created_at, updated_at, reason, ref, base, platform_id)
+        VALUES (?, ?, ?, ?, ?, 'assigned', ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`),
       // The last ? keeps (1) or drops (0) an undelivered reminder: only 接/问 stay the owner's turn.
       // A resumed (was paused) task starts a fresh watch: renewals back to 0 (rework: resetRenewals).
       set: this.db.prepare(`UPDATE tasks SET status = ?, paused_at = NULL, next_check_at = ?, note = ?, updated_at = ?, remind_msg_id = CASE WHEN ? THEN remind_msg_id END,
@@ -234,6 +234,7 @@ export class Tasks {
       paused_at: t.paused_at ?? null, paused_chat: t.paused_chat ?? null,
       // Who is expected to review this hand-back when its dispatcher was busy at hand-back time.
       reviewer: t.reviewer ?? null, reviewer_name: t.reviewer == null ? null : this.nameOf(t.reviewer),
+      platform_id: t.platform_id ?? null,
     };
   }
 
@@ -321,7 +322,7 @@ export class Tasks {
    * `ref`/`base` (#574): an API dispatch passes ref (string, checked by the shared rules) and, for a
    * multi-editor task, base; undefined ref (tasks opened from chat or bridge cards) skips the check.
    */
-  assign({ roomId, title, owner, actor, parentTask, reviewOf, messageId, reason, ref, base, force = false, allowDuplicate = false }) {
+  assign({ roomId, title, owner, actor, parentTask, reviewOf, messageId, reason, ref, base, platformId, force = false, allowDuplicate = false }) {
     if (owner == null || typeof owner !== 'string' || !owner.trim()) throw new CollabError('invalid', '派活必须写明接活人 owner');
     if (this.store.noDispatch(roomId, owner)) throw new CollabError('forbidden', `${this.nameOf(owner)} 是转发机器人，不接活`);
     const room = this.store.room(roomId);
@@ -359,7 +360,8 @@ export class Tasks {
     const why = clip(reason);
     const refText = ref === undefined ? null : clip(ref);
     const baseText = ref === undefined ? null : clip(base);
-    const task = this.q.add.get(roomId, parentTask ?? null, text, owner, actor, now + CHECK_AFTER_S, messageId ?? null, now, now, why, refText, baseText);
+    if (platformId != null && !this.store.platform(platformId)) throw new CollabError('invalid', `unknown platform ${platformId}`);
+    const task = this.q.add.get(roomId, parentTask ?? null, text, owner, actor, now + CHECK_AFTER_S, messageId ?? null, now, now, why, refText, baseText, platformId ?? null);
     if (reviewOf != null) this.q.setSource.run('review', task.id);
     const refNote = `${refText ? `，参照：${refText}` : ''}${baseText ? `，底分支：${baseText}` : ''}`;
     const busyNote = busy.busy ? `（注：该成员在「${busy.roomName}」已有进行中任务 #${busy.task.id}）` : '';
@@ -547,7 +549,7 @@ export class Tasks {
     switch (action) {
       case 'assign':
         if (body.review_of != null && !verified) throw new CollabError('forbidden', 'delegating review needs a verified sender');
-        return this.assign({ roomId, title: body.title, owner: String(body.owner ?? ''), actor, parentTask: optional(body.parent_task), reviewOf: optional(body.review_of), messageId: optional(body.message_id), reason: body.reason, ref: String(body.ref ?? ''), base: body.base, force: Boolean(body.force), allowDuplicate: body.allow_duplicate === true });
+        return this.assign({ roomId, title: body.title, owner: String(body.owner ?? ''), actor, parentTask: optional(body.parent_task), reviewOf: optional(body.review_of), messageId: optional(body.message_id), reason: body.reason, ref: String(body.ref ?? ''), base: body.base, platformId: body.platform_id ?? null, force: Boolean(body.force), allowDuplicate: body.allow_duplicate === true });
       case 'stance': return this.stance(id, { actor, stance: String(body.stance ?? ''), note: body.note, messageId: optional(body.message_id) });
       case 'return': return this.handBack(id, { actor, messageId: optional(body.message_id) });
       case 'relocate':

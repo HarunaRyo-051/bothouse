@@ -29,6 +29,7 @@ const COLUMNS = [
   ['members', 'no_dispatch', 'INTEGER NOT NULL DEFAULT 0'],
   ['tasks', 'termination_reason', 'TEXT'], // v: why a task was cancelled/superseded (terminal states)
   ['tasks', 'superseded_by', 'INTEGER'],
+  ['tasks', 'platform_id', 'TEXT REFERENCES platforms(id) ON DELETE SET NULL'],
   ['tasks', 'reviewer', 'TEXT'], // who reviews a hand-back when its dispatcher is busy (null: the dispatcher)
   ['bindings', 'workspace_path', 'TEXT'], // Keep a CLI conversation in its original directory until /new. // NULL keeps existing names unchanged; only new UI members opt in.
 
@@ -169,6 +170,30 @@ export class Store {
     };
   }
 
+  listPlatforms() { return this.db.prepare('SELECT * FROM platforms ORDER BY created_at, id').all(); }
+  platform(id) { return this.db.prepare('SELECT * FROM platforms WHERE id = ?').get(id); }
+  createPlatform({ id, name, path, is_public = false }) {
+    try {
+      return this.db.prepare('INSERT INTO platforms (id, name, path, is_public, created_at) VALUES (?, ?, ?, ?, ?) RETURNING *')
+        .get(id, name, path, is_public ? 1 : 0, Date.now() / 1000);
+    } catch (error) {
+      if (/UNIQUE constraint failed/.test(error.message)) throw new CollabError('conflict', `platform ${id} already exists`);
+      throw error;
+    }
+  }
+  updatePlatform(id, fields) {
+    const current = this.platform(id);
+    if (!current) throw new CollabError('not-found', 'platform not found');
+    const next = { ...current, ...fields };
+    return this.db.prepare('UPDATE platforms SET name = ?, path = ?, is_public = ? WHERE id = ? RETURNING *')
+      .get(next.name, next.path, next.is_public ? 1 : 0, id);
+  }
+  deletePlatform(id) {
+    const row = this.db.prepare('DELETE FROM platforms WHERE id = ? RETURNING *').get(id);
+    if (!row) throw new CollabError('not-found', 'platform not found');
+    return row;
+  }
+
   listDemands() {
     return this.db.prepare('SELECT * FROM demands ORDER BY created_at DESC, id DESC').all();
   }
@@ -232,6 +257,12 @@ export class Store {
       this.dedupeWorkspaceNames();
       // v9: the tasks table (#139 team mode B), ensured idempotently like the columns above.
       this.ensureTasks();
+      this.db.exec(`CREATE TABLE IF NOT EXISTS platforms (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        path TEXT NOT NULL,
+        is_public INTEGER NOT NULL DEFAULT 0,
+        created_at REAL NOT NULL)`);
       this.db.exec(`CREATE TABLE IF NOT EXISTS demands (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         title TEXT NOT NULL,
@@ -319,11 +350,12 @@ export class Store {
         termination_reason TEXT,
         reviewer TEXT,
         superseded_by INTEGER,
+        platform_id TEXT REFERENCES platforms(id) ON DELETE SET NULL,
         renewals INTEGER NOT NULL DEFAULT 0)`);
     } else {
       const cols = new Set(this.db.prepare('PRAGMA table_info(tasks)').all().map(c => c.name));
       for (const [name, type] of [['parent_task', 'INTEGER'], ['next_check_at', 'REAL'], ['result_msg_id', 'INTEGER'],
-        ['assign_msg_id', 'INTEGER'], ['note', 'TEXT'], ['returned_at', 'REAL'], ['remind_msg_id', 'INTEGER'], ['reason', 'TEXT'], ['paused_at', 'REAL'], ['paused_chat', 'INTEGER'], ['source', 'TEXT'], ['ref', 'TEXT'], ['base', 'TEXT'], ['renewals', 'INTEGER NOT NULL DEFAULT 0'], ['card_member_id', 'TEXT'], ['termination_reason', 'TEXT'], ['superseded_by', 'INTEGER'], ['reviewer', 'TEXT']]) {
+        ['assign_msg_id', 'INTEGER'], ['note', 'TEXT'], ['returned_at', 'REAL'], ['remind_msg_id', 'INTEGER'], ['reason', 'TEXT'], ['paused_at', 'REAL'], ['paused_chat', 'INTEGER'], ['source', 'TEXT'], ['ref', 'TEXT'], ['base', 'TEXT'], ['renewals', 'INTEGER NOT NULL DEFAULT 0'], ['card_member_id', 'TEXT'], ['termination_reason', 'TEXT'], ['superseded_by', 'INTEGER'], ['reviewer', 'TEXT'], ['platform_id', 'TEXT REFERENCES platforms(id) ON DELETE SET NULL']]) {
         if (!cols.has(name)) this.db.exec(`ALTER TABLE tasks ADD COLUMN ${name} ${type}`);
       }
       // #574 B2 upgrade: workspace tasks in work with no check time start their 10-minute watch
