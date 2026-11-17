@@ -2,7 +2,7 @@
 // and DSH delivery jobs. One SQLite file; every write is a single statement or
 // an explicit transaction, so a crash leaves either the old or the new row.
 import { DatabaseSync } from 'node:sqlite';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, realpathSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 const TASK_STATUSES = ['assigned', 'accepted', 'asked', 'declined', 'escalated', 'returned', 'done', 'rework', 'cancelled', 'superseded', 'failed'];
@@ -173,6 +173,9 @@ export class Store {
   listPlatforms() { return this.db.prepare('SELECT * FROM platforms ORDER BY created_at, id').all(); }
   platform(id) { return this.db.prepare('SELECT * FROM platforms WHERE id = ?').get(id); }
   createPlatform({ id, name, path, is_public = false }) {
+    const resolvedPath = existsSync(path) ? realpathSync(path) : path;
+    const duplicate = this.listPlatforms().find(platform => existsSync(platform.path) && realpathSync(platform.path) === resolvedPath);
+    if (duplicate) throw new CollabError('conflict', `这个文件夹已经登记过了：${duplicate.name}`);
     try {
       return this.db.prepare('INSERT INTO platforms (id, name, path, is_public, created_at) VALUES (?, ?, ?, ?, ?) RETURNING *')
         .get(id, name, path, is_public ? 1 : 0, Date.now() / 1000);
@@ -185,6 +188,9 @@ export class Store {
     const current = this.platform(id);
     if (!current) throw new CollabError('not-found', 'platform not found');
     const next = { ...current, ...fields };
+    const resolvedPath = existsSync(next.path) ? realpathSync(next.path) : next.path;
+    const duplicate = this.listPlatforms().find(platform => platform.id !== id && existsSync(platform.path) && realpathSync(platform.path) === resolvedPath);
+    if (duplicate) throw new CollabError('conflict', `这个文件夹已经登记过了：${duplicate.name}`);
     return this.db.prepare('UPDATE platforms SET name = ?, path = ?, is_public = ? WHERE id = ? RETURNING *')
       .get(next.name, next.path, next.is_public ? 1 : 0, id);
   }

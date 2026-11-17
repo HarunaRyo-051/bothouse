@@ -19,7 +19,8 @@ export async function platformRequest<T>(url: string, init?: RequestInit): Promi
       'platform path must be a directory': '路径不是文件夹',
       'platform name and absolute path are required': '请填写名字和绝对路径',
     }
-    throw new Error(known[detail] ?? (response.status === 409 ? `代号冲突：${detail}` : detail))
+    const duplicateFolder = response.status === 409 && detail.startsWith('这个文件夹已经登记过了：')
+    throw new Error(known[detail] ?? (duplicateFolder ? detail : response.status === 409 ? `代号冲突：${detail}` : detail))
   }
   return body as T
 }

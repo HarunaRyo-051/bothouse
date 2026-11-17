@@ -5,7 +5,7 @@ import { Store } from './store.mjs';
 import { platformsRoute } from './plugin.mjs';
 import { Hub } from './hub.mjs';
 import { Tasks } from './tasks.mjs';
-import { rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -29,8 +29,13 @@ function response() {
   return { res: { writeHead(code) { status = code; }, end(data) { result = JSON.parse(data); } }, get: () => ({ status, result }) };
 }
 
-test('platform CRUD validates paths and preserves user files', async () => {
+test('platform CRUD validates paths and deduplicates real directories', async () => {
   const store = new Store(':memory:');
+  const root = mkdtempSync(join(tmpdir(), 'platform-duplicate-'));
+  const folder = join(root, 'folder');
+  const alias = join(root, 'alias');
+  mkdirSync(folder);
+  symlinkSync(folder, alias);
   const call = async (method, path, body) => {
     const req = Readable.from(body === undefined ? [] : [Buffer.from(JSON.stringify(body))]);
     req.method = method;
@@ -39,19 +44,32 @@ test('platform CRUD validates paths and preserves user files', async () => {
     return out.get();
   };
   try {
-    assert.equal((await call('POST', '/collab/api/platforms', { id: 'a', name: 'A', path: '/not-a-real-platform-path' })).status, 400);
-    assert.equal((await call('POST', '/collab/api/platforms', { id: 'a', name: 'A', path: 'relative' })).status, 400);
-    assert.equal((await call('POST', '/collab/api/platforms', { id: 'a', name: 'A', path: process.cwd(), is_public: true })).status, 200);
-    assert.equal((await call('POST', '/collab/api/platforms', { id: 'a', name: 'Again', path: process.cwd() })).status, 409);
+    assert.equal((await call('POST', '/collab/api/platforms', { id: 'missing', name: 'Missing', path: join(root, 'missing') })).status, 400);
+    assert.equal((await call('POST', '/collab/api/platforms', { id: 'relative', name: 'Relative', path: 'relative' })).status, 400);
+    assert.equal((await call('POST', '/collab/api/platforms', { id: 'a', name: 'A', path: folder, is_public: true })).status, 200);
+    const trailingSlash = await call('POST', '/collab/api/platforms', { id: 'slash', name: 'Slash', path: `${folder}/` });
+    assert.equal(trailingSlash.status, 409);
+    assert.equal(trailingSlash.result.error, '这个文件夹已经登记过了：A');
+    const symlink = await call('POST', '/collab/api/platforms', { id: 'link', name: 'Link', path: alias });
+    assert.equal(symlink.status, 409);
+    assert.equal(symlink.result.error, '这个文件夹已经登记过了：A');
     assert.equal((await call('GET', '/collab/api/platforms')).result.platforms.length, 1);
     const plainFile = new URL('./platforms.test.mjs', import.meta.url).pathname;
     assert.equal((await call('POST', '/collab/api/platforms', { id: 'file', name: 'File', path: plainFile })).status, 400);
     assert.equal((await call('PATCH', '/collab/api/platforms/a', { path: plainFile })).status, 400);
-    assert.equal(store.platform('a').path, process.cwd());
+    assert.equal(store.platform('a').path, folder);
     assert.equal((await call('PATCH', '/collab/api/platforms/a', { name: 'A2' })).result.platform.name, 'A2');
+    const second = join(root, 'second');
+    mkdirSync(second);
+    assert.equal((await call('POST', '/collab/api/platforms', { id: 'b', name: 'B', path: second })).status, 200);
+    const editDuplicate = await call('PATCH', '/collab/api/platforms/b', { path: alias });
+    assert.equal(editDuplicate.status, 409);
+    assert.equal(editDuplicate.result.error, '这个文件夹已经登记过了：A2');
+    assert.equal(store.platform('b').path, second);
     assert.equal((await call('DELETE', '/collab/api/platforms/a')).status, 200);
+    assert.equal((await call('DELETE', '/collab/api/platforms/b')).status, 200);
     assert.deepEqual(store.listPlatforms(), []);
-  } finally { store.close(); }
+  } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
 });
 
 test('tasks store platform binding and distinguish unspecified prompt constraint', () => {
