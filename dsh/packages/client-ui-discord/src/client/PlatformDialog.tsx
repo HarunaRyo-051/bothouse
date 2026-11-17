@@ -3,6 +3,7 @@ import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { NS } from './locales.ts'
 import { platformRequest, type PlatformRecord } from './platforms.ts'
 import css from './ChannelsPage.module.css'
+import { randomUUID } from './uuid.ts'
 
 type Props = { t: TranslateNS<typeof NS>; onClose: () => void; onChange: (rows: readonly PlatformRecord[]) => void }
 type FileCount = { count: number; truncated: boolean } | { error: string }
@@ -40,7 +41,7 @@ export function PlatformDialog({ t, onClose, onChange }: Props) {
   const save = async (): Promise<void> => {
     setBusy(true); setError('')
     try {
-      const id = draft.id || `p-${crypto.randomUUID().replaceAll('-', '').slice(0, 28)}`
+      const id = draft.id || `p-${randomUUID().replaceAll('-', '').slice(0, 28)}`
       await platformRequest(`/collab/api/platforms${draft.id ? `/${encodeURIComponent(id)}` : ''}`, {
         method: draft.id ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...draft, id }),
       })
@@ -62,14 +63,16 @@ export function PlatformDialog({ t, onClose, onChange }: Props) {
     }}>
       <h2 className={css.dialogTitle}>{t('platformLibrary')}</h2>
       <div className={css.settingsBody}>
-        {loading ? <p role="status">{t('platformLoading')}</p> : rows.length === 0 ? <p>{t('platformEmpty')}</p> : rows.map(row => <div key={row.id} className={css.settingsFields}>
+        {loading ? <p role="status">{t('platformLoading')}</p> : rows.length === 0 ? <p>{t('platformEmpty')}</p> : rows.map(row => {
+          const count = counts[row.id]
+          return <div key={row.id} className={css.settingsFields}>
           <div style={{ overflowWrap: 'anywhere' }}>{row.name} · {row.path} {Boolean(row.is_public) && <span className={css.tag}>{t('platformPublic')}</span>}</div>
-          <div>{counts[row.id] === undefined ? t('platformLoading') : 'error' in counts[row.id] ? <span role="alert">{counts[row.id].error}</span> : <span>{t('platformFiles', { count: counts[row.id].count })}{counts[row.id].truncated ? '+' : ''}</span>}</div>
+          <div>{count === undefined ? t('platformLoading') : 'error' in count ? <span role="alert">{count.error}</span> : <span>{t('platformFiles', { count: count.count })}{count.truncated ? '+' : ''}</span>}</div>
           <div className={css.dialogActions}>
             <button className={css.secondaryButton} type="button" disabled={busy} onClick={() => { setDraft({ ...row, is_public: Boolean(row.is_public) }); setDeleting(undefined); setError('') }}>{t('platformEdit')}</button>
             <button className={css.secondaryButton} type="button" disabled={busy} onClick={() => { setDeleting(row); setError('') }}>{t('platformDelete')}</button>
           </div>
-        </div>)}
+        </div>})}
         {deleting && <section role="alertdialog" aria-label={t('platformDelete')}>
           <p>{t('platformDeleteConfirm', { name: deleting.name })}</p>
           <div className={css.dialogActions}>
