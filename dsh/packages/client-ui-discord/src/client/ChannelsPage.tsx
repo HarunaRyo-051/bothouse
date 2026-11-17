@@ -15,6 +15,7 @@ import { AttachmentList, PendingAttachments, useComposerAttachments } from './At
 import { groupRooms } from './channel-source.ts'
 import { TaskBoard, TaskCard } from './TaskBoard.tsx'
 import { loadPlatforms, type PlatformOption } from './platforms.ts'
+import { PlatformDialog } from './PlatformDialog.tsx'
 import { isLiveTask } from './task-board.ts'
 import { AskInbox } from './AskInbox.tsx'
 import { ProgressCard } from './ProgressCard.tsx'
@@ -349,6 +350,7 @@ function MemberGroup({ title, members, busy, onPick, onEdit, onRemove, t }: {
 export function ChannelsPage({ useChannels, selectRoom, send, reviewTask, updateTaskPlatform, relocateTask, terminateTask, answerAsk, createRoom, renameRoom, listModels, listClis, listPersonas, addMember, updateMember, removeMember, setNoDispatch, getNoDispatch, replaceNoDispatch, setLead, setWorkspacePath, renewRoom, setDispatchMode, setMaxRelay, decidePermission, retryMessage, editMessage, withdrawMessage, openModelSettings, t }: ChannelsPageProps) {
   const state = useChannels(snapshot => snapshot)
   const [platforms, setPlatforms] = useState<readonly PlatformOption[]>([])
+  const [platformsOpen, setPlatformsOpen] = useState(false)
   useEffect(() => {
     let active = true
     void loadPlatforms().then(rows => { if (active) setPlatforms(rows) }).catch(() => { if (active) setPlatforms([]) })
@@ -735,6 +737,7 @@ export function ChannelsPage({ useChannels, selectRoom, send, reviewTask, update
           <button type="button" className={css.panelToggle} title={t(roomsHidden ? 'expandRooms' : 'collapseRooms')} aria-label={t(roomsHidden ? 'expandRooms' : 'collapseRooms')} aria-expanded={!roomsHidden} onClick={() => { setRoomsHidden(!roomsHidden) }}>{roomsHidden ? '»' : '«'}</button>
           <span className={css.hash} aria-hidden>#</span><span className={css.roomName}>{room?.name}</span>
           {busy.size > 0 && <span className={css.headBusy} title={t('headBusyTitle', { n: String(busy.size) })}>● {busy.size}</span>}
+          <button type="button" className={css.secondaryButton} onClick={() => { setPlatformsOpen(true) }}>{t('platformLibrary')}</button>
           <button type="button" className={`${css.panelToggle} ${css.panelToggleEnd}`} title={t(membersHidden ? 'expandMembers' : 'collapseMembers')} aria-label={t(membersHidden ? 'expandMembers' : 'collapseMembers')} aria-expanded={!membersHidden} onClick={() => { setMembersHidden(!membersHidden) }}>{membersHidden ? '«' : '»'}</button>
           <button type="button" className={css.mobileButton} aria-label={t('showMembers')} aria-expanded={drawer === 'members'} onClick={() => setDrawer(drawer === 'members' ? undefined : 'members')}>{t('membersButton')}</button>
         </header>
@@ -911,6 +914,7 @@ export function ChannelsPage({ useChannels, selectRoom, send, reviewTask, update
         <MemberGroup title={t('agents', { count: String(visibleMembers.filter(m => m.kind !== 'human').length) })} members={visibleMembers.filter(m => m.kind !== 'human')} busy={busy} onPick={pickFromList} onEdit={setDialog} onRemove={confirmRemove} t={t} />
         <MemberGroup title={t('humans', { count: String(visibleMembers.filter(m => m.kind === 'human').length) })} members={visibleMembers.filter(m => m.kind === 'human')} busy={busy} onPick={pickFromList} onEdit={setDialog} onRemove={confirmRemove} t={t} />
       </aside>
+      {platformsOpen && <PlatformDialog t={t} onClose={() => { setPlatformsOpen(false) }} onChange={setPlatforms} />}
       {settingsOpen && room !== undefined && <ChannelSettingsDialog
         key={room.id}
         room={room}
