@@ -35,6 +35,28 @@ function props(state: ChannelSnapshot, send: ChannelsPageProps['send'] = async (
 }
 
 describe('channels page', () => {
+  it('opens platform library without tasks and updates task options immediately after creation', async () => {
+    let platforms: unknown[] = []
+    const fetcher = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+      if (init?.method === 'POST') { platforms = [JSON.parse(String(init.body))]; return { ok: true, json: async () => ({}) } as Response }
+      return { ok: true, json: async () => String(url).endsWith('/files') ? { files: [], truncated: false } : { platforms } } as Response
+    })
+    try {
+      const task = { id: 81, room_id: 1, parent_task: null, title: 'Platform task', owner: 'ju', owner_name: '橘', created_by: 'owner', created_by_name: 'Owner', status: 'accepted' as const, next_check_at: null, assign_msg_id: null, result_msg_id: null, note: null, created_at: 1, updated_at: 1, returned_at: null, platform_id: null }
+      const view = render(<ChannelsPage {...props({ ...ready, tasks: [] })} />)
+      fireEvent.click(screen.getByRole('button', { name: zh.platformLibrary }))
+      await act(async () => {})
+      expect(screen.getByRole('dialog', { name: zh.platformLibrary })).toBeTruthy()
+      fireEvent.change(screen.getByLabelText(zh.platformName), { target: { value: '新增平台' } })
+      fireEvent.change(screen.getByLabelText(zh.platformPath), { target: { value: '/tmp/platform-fixture' } })
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: zh.messageSave })) })
+      expect(screen.getByText('新增平台 · /tmp/platform-fixture')).toBeTruthy()
+      fireEvent.click(screen.getByRole('button', { name: zh.close }))
+      view.rerender(<ChannelsPage {...props({ ...ready, taskChat: 1, tasks: [task] })} updateTaskPlatform={vi.fn(async () => {})} />)
+      fireEvent.click(screen.getByRole('button', { name: zh.taskBoardOpen }))
+      expect(within(screen.getByRole('combobox', { name: '#81 平台' })).getByRole('option', { name: '新增平台' })).toBeTruthy()
+    } finally { fetcher.mockRestore() }
+  })
   it('selects, changes and clears a task platform through page props', async () => {
     const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => ({ platforms: [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }], files: [{ name: 'rules.txt', size: 12, mtime: 1000, isDir: false }] }) } as Response)
     const task = { id: 81, room_id: 1, parent_task: null, title: 'Platform task', owner: 'ju', owner_name: '橘', created_by: 'owner', created_by_name: 'Owner', status: 'accepted' as const, next_check_at: null, assign_msg_id: null, result_msg_id: null, note: null, created_at: 1, updated_at: 1, returned_at: null, platform_id: null as string | null }
