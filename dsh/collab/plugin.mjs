@@ -6,7 +6,7 @@ import { personaLibrary } from './personas.mjs';
 //         name: /abs/path/dsh/collab/plugin.mjs
 //         config: { dataDir, workspacePath, leadFile?, fallbackLead?, botTokenEnv?, ownerName?, rooms?, dshMembers?, maxRelay? }
 import { createRequire } from 'node:module';
-import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { Store, CollabError, publicMessage } from './store.mjs';
@@ -568,6 +568,25 @@ export function platformsRoute(req, res, path, store, owner) {
     if (!owner(req)) return json(res, 401, { error: 'unauthorized' });
     if (req.method === 'GET') return json(res, 200, { platforms: store.listPlatforms() });
     return withBody(req, res, body => ({ platform: savePlatform(store, body) }));
+  }
+  const files = /^\/collab\/api\/platforms\/([^/]+)\/files$/.exec(path);
+  if (files) {
+    if (!owner(req)) return json(res, 401, { error: 'unauthorized' });
+    if (req.method !== 'GET') return json(res, 404, { error: 'not found' });
+    const platform = store.platform(decodeURIComponent(files[1]));
+    if (!platform) return json(res, 404, { error: 'platform not found' });
+    if (!isAbsolute(platform.path)) return json(res, 400, { error: 'platform path must be absolute' });
+    try {
+      if (!statSync(platform.path).isDirectory()) return json(res, 400, { error: 'platform path must be a directory' });
+      const entries = readdirSync(platform.path).sort();
+      const listed = entries.slice(0, 200).map(name => {
+        const stat = lstatSync(join(platform.path, name));
+        return { name, size: stat.size, mtime: stat.mtimeMs, isDir: stat.isDirectory() };
+      });
+      return json(res, 200, { files: listed, truncated: entries.length > 200 });
+    } catch (error) {
+      return json(res, error.code === 'ENOENT' ? 404 : 400, { error: 'platform folder cannot be listed' });
+    }
   }
   const match = /^\/collab\/api\/platforms\/([^/]+)$/.exec(path);
   if (!match) return undefined;

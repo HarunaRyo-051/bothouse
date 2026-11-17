@@ -10,6 +10,36 @@ import type { ChannelRoom, ChannelTask, TaskStatus } from './channel-source.ts'
 import { BOARD_TABS, boardSections, cardMembers, sectionTitle, elapsed, formatDuration, STATUS_KEY, type T } from './task-board.ts'
 import css from './ChannelsPage.module.css'
 
+interface PlatformFile { name: string; size: number; mtime: number; isDir: boolean }
+
+function PlatformFiles({ platformId }: { platformId: string }) {
+  const [result, setResult] = useState<{ files: PlatformFile[]; truncated?: boolean }>()
+  const [error, setError] = useState<string>()
+  const [open, setOpen] = useState(false)
+  useEffect(() => {
+    let active = true
+    setResult(undefined); setError(undefined); setOpen(false)
+    void fetch(`/collab/api/platforms/${encodeURIComponent(platformId)}/files`).then(async response => {
+      if (!response.ok) throw new Error(`文件列表读取失败：${response.status}`)
+      return await response.json() as { files: PlatformFile[]; truncated?: boolean }
+    }).then(result => { if (active) setResult(result) }).catch(error => {
+      if (active) setError(error instanceof Error ? error.message : String(error))
+    })
+    return () => { active = false }
+  }, [platformId])
+  if (error) return <span role="alert">{error}</span>
+  if (!result) return <span>文件列表加载中…</span>
+  return <span>
+    <button type="button" aria-expanded={open} onClick={() => { setOpen(!open) }}>{result.files.length}{result.truncated ? '+' : ''} 个文件</button>
+    {open && <div aria-label="平台文件列表">
+      {result.files.length === 0 ? <span>文件夹为空</span> : <ul>{result.files.map(file => <li key={file.name}>
+        {file.name}{file.isDir ? '（文件夹）' : ` · ${file.size} 字节`} · {new Date(file.mtime).toLocaleString()}
+      </li>)}</ul>}
+      {result.truncated && <span>仅显示前 200 项</span>}
+    </div>}
+  </span>
+}
+
 function clock(seconds: number): string {
   return new Date(seconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
@@ -105,6 +135,7 @@ export function TaskBoard({ tasks, rooms, chatId, roomId, platforms = [], t, onO
           setSaving(true); setError(undefined)
           void onPlatformChange(task.id, event.target.value || null).catch(error => { setError(error instanceof Error ? error.message : String(error)) }).finally(() => { setSaving(false) })
         }}><option value="">未指定</option>{platforms.map(platform => <option key={platform.id} value={platform.id}>{platform.name}</option>)}</select></label>}
+        {task.platform_id && <PlatformFiles key={task.platform_id} platformId={task.platform_id} />}
         <span>{task.owner_name}</span>
         <span>{t('taskElapsed', { d: formatDuration(elapsed(task, now), t) })}</span>
         {task.next_check_at !== null && <span>{t('taskNextCheck', { time: clock(task.next_check_at) })}</span>}

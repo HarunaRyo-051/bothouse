@@ -73,3 +73,47 @@ test('tasks store platform binding and distinguish unspecified prompt constraint
     assert.equal(tasks.setPlatform(bound.id, null).platform_id, null);
   } finally { tasks.close(); store.close(); }
 });
+
+
+test('platform file listing is shallow, capped, read only and validates paths', async () => {
+  const store = new Store(':memory:');
+  const { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync } = await import('node:fs');
+  const folder = mkdtempSync(join(tmpdir(), 'platform-files-'));
+  const call = async (id, method = 'GET', authorized = true) => {
+    const out = response();
+    await platformsRoute({ method }, out.res, `/collab/api/platforms/${id}/files`, store, () => authorized);
+    return out.get();
+  };
+  try {
+    mkdirSync(join(folder, 'nested'));
+    writeFileSync(join(folder, 'note.txt'), 'untouched');
+    writeFileSync(join(folder, 'nested', 'hidden.txt'), 'nested');
+    store.createPlatform({ id: 'a', name: 'A', path: folder });
+    const before = readdirSync(folder);
+    const listed = await call('a');
+    assert.equal(listed.status, 200);
+    assert.deepEqual(listed.result.files.map(f => f.name), ['nested', 'note.txt']);
+    assert.equal(listed.result.files[0].isDir, true);
+    assert.equal(listed.result.files[1].size, 9);
+    assert.equal(typeof listed.result.files[1].mtime, 'number');
+    assert.deepEqual(Object.keys(listed.result.files[1]).sort(), ['isDir', 'mtime', 'name', 'size']);
+    assert.equal((await call('a', 'GET', false)).status, 401);
+    for (const method of ['POST', 'PATCH', 'DELETE']) assert.equal((await call('a', method)).status, 404);
+    assert.deepEqual(readdirSync(folder), before);
+    assert.equal(readFileSync(join(folder, 'note.txt'), 'utf8'), 'untouched');
+    for (let i = 0; i < 201; i++) writeFileSync(join(folder, `file-${i}`), '');
+    const capped = await call('a');
+    assert.equal(capped.result.files.length, 200);
+    assert.equal(capped.result.truncated, true);
+    assert.equal((await call('unknown')).status, 404);
+    store.updatePlatform('a', { path: join(folder, 'missing') });
+    assert.equal((await call('a')).status, 404);
+    store.updatePlatform('a', { path: join(folder, 'note.txt') });
+    assert.equal((await call('a')).status, 400);
+    store.updatePlatform('a', { path: 'relative' });
+    assert.equal((await call('a')).status, 400);
+  } finally {
+    store.close();
+    // Temporary fixture directory is left for OS cleanup.
+  }
+});

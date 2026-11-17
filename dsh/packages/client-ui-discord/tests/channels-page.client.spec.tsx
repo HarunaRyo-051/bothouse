@@ -36,7 +36,7 @@ function props(state: ChannelSnapshot, send: ChannelsPageProps['send'] = async (
 
 describe('channels page', () => {
   it('selects, changes and clears a task platform through page props', async () => {
-    const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => ({ platforms: [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }] }) } as Response)
+    const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => ({ platforms: [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }], files: [{ name: 'rules.txt', size: 12, mtime: 1000, isDir: false }] }) } as Response)
     const task = { id: 81, room_id: 1, parent_task: null, title: 'Platform task', owner: 'ju', owner_name: '橘', created_by: 'owner', created_by_name: 'Owner', status: 'accepted' as const, next_check_at: null, assign_msg_id: null, result_msg_id: null, note: null, created_at: 1, updated_at: 1, returned_at: null, platform_id: null as string | null }
     const update = vi.fn(async (_id: number, platform: string | null) => { task.platform_id = platform })
     try {
@@ -49,6 +49,12 @@ describe('channels page', () => {
         view.rerender(<ChannelsPage {...pageProps} />)
         expect(update).toHaveBeenLastCalledWith(81, value || null)
         expect((screen.getByRole('combobox', { name: '#81 平台' }) as HTMLSelectElement).value).toBe(value)
+        if (value) {
+          await act(async () => {})
+          fireEvent.click(screen.getByRole('button', { name: '1 个文件' }))
+          expect(screen.getByText(/rules.txt/)).toBeTruthy()
+          expect(fetcher).toHaveBeenCalledWith(`/collab/api/platforms/${value}/files`)
+        } else expect(screen.queryByRole('button', { name: '1 个文件' })).toBeNull()
       }
       expect(update).toHaveBeenCalledTimes(3)
     } finally { fetcher.mockRestore() }
