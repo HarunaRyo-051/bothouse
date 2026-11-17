@@ -1,4 +1,4 @@
-// dsh-client-source-sha256: a0d8477d96c0869f1c29725b1a220161b00a9e0246a4698a9cebf34af9779145
+// dsh-client-source-sha256: 4bfb13d3d05deae95dca7caf88d2dd9b51265c83b1d0a3d0d3d118a7fa0bf674
 // dsh-style-sha256: 96f0046d930849d4d316bd118c14c9ff6f4d06ad164a6df43f3adb147116959d
 window.__ModuleLoader__.load({
  id: "@deepseek-ai/dsh-experimental-client-ui-discord",
@@ -17700,10 +17700,311 @@ function TaskCard({ taskId, tasks, t }) {
 	});
 }
 // src/client/platforms.ts
+/** Preserve server validation details at the form that submitted them. */
+async function platformRequest(url, init) {
+	const response = await fetch(url, init);
+	const body = await response.json();
+	if (!response.ok) {
+		const detail = String(body.error ?? response.status);
+		throw new Error({
+			"platform path does not exist": "路径不存在",
+			"platform path must be a directory": "路径不是文件夹",
+			"platform name and absolute path are required": "请填写名字和绝对路径"
+		}[detail] ?? (response.status === 409 ? `代号冲突：${detail}` : detail));
+	}
+	return body;
+}
 async function loadPlatforms(fetcher = fetch) {
 	const response = await fetcher("/collab/api/platforms");
 	if (!response.ok) throw new Error(`平台列表读取失败：${response.status}`);
 	return (await response.json()).platforms ?? [];
+}
+// src/client/PlatformDialog.tsx
+function PlatformDialog({ t, onClose, onChange }) {
+	const [rows, setRows] = (0, react.useState)([]);
+	const [counts, setCounts] = (0, react.useState)({});
+	const [loading, setLoading] = (0, react.useState)(true);
+	const [error, setError] = (0, react.useState)("");
+	const [draft, setDraft] = (0, react.useState)({
+		id: "",
+		name: "",
+		path: "",
+		is_public: false
+	});
+	const [busy, setBusy] = (0, react.useState)(false);
+	const [deleting, setDeleting] = (0, react.useState)();
+	const dialog = (0, react.useRef)(null);
+	const change = (0, react.useRef)(onChange);
+	change.current = onChange;
+	const refresh = async () => {
+		const body = await platformRequest("/collab/api/platforms");
+		setRows(body.platforms);
+		change.current(body.platforms);
+		setCounts({});
+		await Promise.all(body.platforms.map(async (row) => {
+			try {
+				const body = await platformRequest(`/collab/api/platforms/${encodeURIComponent(row.id)}/files`);
+				setCounts((previous) => ({
+					...previous,
+					[row.id]: {
+						count: body.files.filter((file) => !file.isDir).length,
+						truncated: body.truncated
+					}
+				}));
+			} catch (error) {
+				setCounts((previous) => ({
+					...previous,
+					[row.id]: { error: error instanceof Error ? error.message : String(error) }
+				}));
+			}
+		}));
+	};
+	(0, react.useEffect)(() => {
+		dialog.current?.focus();
+		refresh().catch((error) => {
+			setError(error instanceof Error ? error.message : String(error));
+		}).finally(() => {
+			setLoading(false);
+		});
+	}, []);
+	const reset = () => {
+		setDraft({
+			id: "",
+			name: "",
+			path: "",
+			is_public: false
+		});
+		setError("");
+	};
+	const save = async () => {
+		setBusy(true);
+		setError("");
+		try {
+			const id = draft.id || `p-${randomUUID().replaceAll("-", "").slice(0, 28)}`;
+			await platformRequest(`/collab/api/platforms${draft.id ? `/${encodeURIComponent(id)}` : ""}`, {
+				method: draft.id ? "PATCH" : "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					...draft,
+					id
+				})
+			});
+			reset();
+			await refresh();
+		} catch (error) {
+			setError(error instanceof Error ? error.message : String(error));
+		} finally {
+			setBusy(false);
+		}
+	};
+	const close = () => {
+		if (!busy) onClose();
+	};
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+		className: ChannelsPage_module_default.dialogBackdrop,
+		onClick: close,
+		children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("section", {
+			className: `${ChannelsPage_module_default.dialog} ${ChannelsPage_module_default.settingsDialog}`,
+			ref: dialog,
+			tabIndex: -1,
+			role: "dialog",
+			"aria-modal": "true",
+			"aria-label": t("platformLibrary"),
+			onClick: (event) => event.stopPropagation(),
+			onKeyDown: (event) => {
+				if (event.key === "Escape") {
+					event.preventDefault();
+					close();
+				}
+				if (event.key !== "Tab") return;
+				const controls = Array.from(event.currentTarget.querySelectorAll("button:not(:disabled), input:not(:disabled)"));
+				const first = controls[0], last = controls.at(-1);
+				if (!controls.includes(document.activeElement) || (event.shiftKey ? document.activeElement === first : document.activeElement === last)) {
+					event.preventDefault();
+					(event.shiftKey ? last : first)?.focus();
+				}
+			},
+			children: [
+				/* @__PURE__ */ (0, react_jsx_runtime.jsx)("h2", {
+					className: ChannelsPage_module_default.dialogTitle,
+					children: t("platformLibrary")
+				}),
+				/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: ChannelsPage_module_default.settingsBody,
+					children: [
+						loading ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+							role: "status",
+							children: t("platformLoading")
+						}) : rows.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", { children: t("platformEmpty") }) : rows.map((row) => {
+							const count = counts[row.id];
+							return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: ChannelsPage_module_default.settingsFields,
+								children: [
+									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+										style: { overflowWrap: "anywhere" },
+										children: [
+											row.name,
+											" · ",
+											row.path,
+											" ",
+											Boolean(row.is_public) && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+												className: ChannelsPage_module_default.tag,
+												children: t("platformPublic")
+											})
+										]
+									}),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { children: count === void 0 ? t("platformLoading") : "error" in count ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+										role: "alert",
+										children: count.error
+									}) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: [t("platformFiles", { count: count.count }), count.truncated ? "+" : ""] }) }),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+										className: ChannelsPage_module_default.dialogActions,
+										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+											className: ChannelsPage_module_default.secondaryButton,
+											type: "button",
+											disabled: busy,
+											onClick: () => {
+												setDraft({
+													...row,
+													is_public: Boolean(row.is_public)
+												});
+												setDeleting(void 0);
+												setError("");
+											},
+											children: t("platformEdit")
+										}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+											className: ChannelsPage_module_default.secondaryButton,
+											type: "button",
+											disabled: busy,
+											onClick: () => {
+												setDeleting(row);
+												setError("");
+											},
+											children: t("platformDelete")
+										})]
+									})
+								]
+							}, row.id);
+						}),
+						deleting && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("section", {
+							role: "alertdialog",
+							"aria-label": t("platformDelete"),
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", { children: t("platformDeleteConfirm", { name: deleting.name }) }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: ChannelsPage_module_default.dialogActions,
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+									type: "button",
+									className: ChannelsPage_module_default.secondaryButton,
+									disabled: busy,
+									onClick: () => setDeleting(void 0),
+									children: t("cancel")
+								}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+									type: "button",
+									className: ChannelsPage_module_default.primaryButton,
+									disabled: busy,
+									onClick: () => {
+										setBusy(true);
+										setError("");
+										platformRequest(`/collab/api/platforms/${encodeURIComponent(deleting.id)}`, { method: "DELETE" }).then(async () => {
+											if (draft.id === deleting.id) reset();
+											setDeleting(void 0);
+											await refresh();
+										}).catch((error) => {
+											setError(error instanceof Error ? error.message : String(error));
+										}).finally(() => setBusy(false));
+									},
+									children: t("platformDelete")
+								})]
+							})]
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("form", {
+							className: ChannelsPage_module_default.settingsFields,
+							onSubmit: (event) => {
+								event.preventDefault();
+								save();
+							},
+							children: [
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("h3", { children: t(draft.id ? "platformEdit" : "platformAdd") }),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", {
+									className: ChannelsPage_module_default.field,
+									children: [t("platformName"), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+										required: true,
+										className: ChannelsPage_module_default.fieldInput,
+										disabled: busy,
+										value: draft.name,
+										onChange: (event) => {
+											setDraft({
+												...draft,
+												name: event.target.value
+											});
+										}
+									})]
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", {
+									className: ChannelsPage_module_default.field,
+									children: [t("platformPath"), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+										required: true,
+										className: ChannelsPage_module_default.fieldInput,
+										disabled: busy,
+										value: draft.path,
+										onChange: (event) => {
+											setDraft({
+												...draft,
+												path: event.target.value
+											});
+										}
+									})]
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", {
+									className: ChannelsPage_module_default.choice,
+									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+										type: "checkbox",
+										disabled: busy,
+										checked: draft.is_public,
+										onChange: (event) => {
+											setDraft({
+												...draft,
+												is_public: event.target.checked
+											});
+										}
+									}), t("platformPublic")]
+								}),
+								error && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									className: ChannelsPage_module_default.sendError,
+									role: "alert",
+									children: error
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+									className: ChannelsPage_module_default.dialogActions,
+									children: [draft.id && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+										type: "button",
+										className: ChannelsPage_module_default.secondaryButton,
+										disabled: busy,
+										onClick: reset,
+										children: t("cancel")
+									}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+										type: "submit",
+										className: ChannelsPage_module_default.primaryButton,
+										disabled: busy || loading || !draft.name.trim() || !draft.path.trim(),
+										children: t(busy ? "settingsSaving" : "messageSave")
+									})]
+								})
+							]
+						})
+					]
+				}),
+				/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: ChannelsPage_module_default.dialogActions,
+					children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						type: "button",
+						className: ChannelsPage_module_default.secondaryButton,
+						disabled: busy,
+						onClick: close,
+						children: t("close")
+					})
+				})
+			]
+		})
+	});
 }
 // src/client/AskInbox.tsx
 function Preview({ text, t }) {
@@ -19769,6 +20070,7 @@ function MemberGroup({ title, members, busy, onPick, onEdit, onRemove, t }) {
 function ChannelsPage({ useChannels, selectRoom, send, reviewTask, updateTaskPlatform, relocateTask, terminateTask, answerAsk, createRoom, renameRoom, listModels, listClis, listPersonas, addMember, updateMember, removeMember, setNoDispatch, getNoDispatch, replaceNoDispatch, setLead, setWorkspacePath, renewRoom, setDispatchMode, setMaxRelay, decidePermission, retryMessage, editMessage, withdrawMessage, openModelSettings, t }) {
 	const state = useChannels((snapshot) => snapshot);
 	const [platforms, setPlatforms] = (0, react.useState)([]);
+	const [platformsOpen, setPlatformsOpen] = (0, react.useState)(false);
 	(0, react.useEffect)(() => {
 		let active = true;
 		loadPlatforms().then((rows) => {
@@ -20303,6 +20605,14 @@ function ChannelsPage({ useChannels, selectRoom, send, reviewTask, updateTaskPla
 							}),
 							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 								type: "button",
+								className: ChannelsPage_module_default.secondaryButton,
+								onClick: () => {
+									setPlatformsOpen(true);
+								},
+								children: t("platformLibrary")
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								type: "button",
 								className: `${ChannelsPage_module_default.panelToggle} ${ChannelsPage_module_default.panelToggleEnd}`,
 								title: t(membersHidden ? "expandMembers" : "collapseMembers"),
 								"aria-label": t(membersHidden ? "expandMembers" : "collapseMembers"),
@@ -20657,6 +20967,13 @@ function ChannelsPage({ useChannels, selectRoom, send, reviewTask, updateTaskPla
 					})
 				]
 			}),
+			platformsOpen && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(PlatformDialog, {
+				t,
+				onClose: () => {
+					setPlatformsOpen(false);
+				},
+				onChange: setPlatforms
+			}),
 			settingsOpen && room !== void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ChannelSettingsDialog, {
 				room,
 				members: visibleMembers,
@@ -20742,6 +21059,17 @@ const zh = {
 	attachmentCopyError: "复制失败，请下载图片后保存或复制。",
 	footnotes: "脚注",
 	panel: "频道",
+	platformLibrary: "平台资料",
+	platformEmpty: "还没有登记平台。登记后，任务才能选择平台、并按平台限定资料范围。",
+	platformName: "名字",
+	platformPath: "绝对路径",
+	platformPublic: "公共",
+	platformAdd: "新增",
+	platformEdit: "编辑",
+	platformDelete: "删除",
+	platformDeleteConfirm: "确认删除「{name}」？任务上的平台会被清空。资料文件不会删除。",
+	platformFiles: "{count} 个文件",
+	platformLoading: "读取中…",
 	channelSettings: "频道设置",
 	settingsBasic: "基本",
 	settingsDispatch: "派活",
@@ -20965,6 +21293,17 @@ const zh = {
 };
 /** English dictionary. */
 const en = {
+	platformLibrary: "Platform files",
+	platformEmpty: "No platforms registered yet. Register one to select it on tasks and limit their reference scope.",
+	platformName: "Name",
+	platformPath: "Absolute path",
+	platformPublic: "Public",
+	platformAdd: "Add",
+	platformEdit: "Edit",
+	platformDelete: "Delete",
+	platformDeleteConfirm: "Delete “{name}”? Platforms on tasks will be cleared. Reference files will be kept.",
+	platformFiles: "{count} files",
+	platformLoading: "Loading…",
 	approvalCount: "{count} permissions awaiting approval",
 	failureCount: "{count} failures needing attention",
 	askCount: "{count} questions awaiting answers",
