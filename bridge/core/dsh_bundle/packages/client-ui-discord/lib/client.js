@@ -1,4 +1,4 @@
-// dsh-client-source-sha256: 4bfb13d3d05deae95dca7caf88d2dd9b51265c83b1d0a3d0d3d118a7fa0bf674
+// dsh-client-source-sha256: c5eeb157232bd5c7295a5e7224ea118d8c95825fcd6eebf72eb25536e546b841
 // dsh-style-sha256: 96f0046d930849d4d316bd118c14c9ff6f4d06ad164a6df43f3adb147116959d
 window.__ModuleLoader__.load({
  id: "@deepseek-ai/dsh-experimental-client-ui-discord",
@@ -17706,11 +17706,13 @@ async function platformRequest(url, init) {
 	const body = await response.json();
 	if (!response.ok) {
 		const detail = String(body.error ?? response.status);
-		throw new Error({
+		const known = {
 			"platform path does not exist": "路径不存在",
 			"platform path must be a directory": "路径不是文件夹",
 			"platform name and absolute path are required": "请填写名字和绝对路径"
-		}[detail] ?? (response.status === 409 ? `代号冲突：${detail}` : detail));
+		};
+		const duplicateFolder = response.status === 409 && detail.startsWith("这个文件夹已经登记过了：");
+		throw new Error(known[detail] ?? (duplicateFolder ? detail : response.status === 409 ? `代号冲突：${detail}` : detail));
 	}
 	return body;
 }
