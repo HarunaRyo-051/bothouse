@@ -1,4 +1,4 @@
-// dsh-client-source-sha256: 374d76ecf92f6d3bc592f21cd96fcf0b48646dd042d41765258bfc6d53436d7f
+// dsh-client-source-sha256: a0d8477d96c0869f1c29725b1a220161b00a9e0246a4698a9cebf34af9779145
 // dsh-style-sha256: 96f0046d930849d4d316bd118c14c9ff6f4d06ad164a6df43f3adb147116959d
 window.__ModuleLoader__.load({
  id: "@deepseek-ai/dsh-experimental-client-ui-discord",
@@ -17216,6 +17216,53 @@ function boardSections(tasks, rooms, chatId, roomId) {
 * message stream (one row per member: the task owner and its sub-tasks, each
 * with its elapsed time). Data comes from the snapshot's `tasks`.
 */
+function PlatformFiles({ platformId }) {
+	const [result, setResult] = (0, react.useState)();
+	const [error, setError] = (0, react.useState)();
+	const [open, setOpen] = (0, react.useState)(false);
+	(0, react.useEffect)(() => {
+		let active = true;
+		setResult(void 0);
+		setError(void 0);
+		setOpen(false);
+		fetch(`/collab/api/platforms/${encodeURIComponent(platformId)}/files`).then(async (response) => {
+			if (!response.ok) throw new Error(`文件列表读取失败：${response.status}`);
+			return await response.json();
+		}).then((result) => {
+			if (active) setResult(result);
+		}).catch((error) => {
+			if (active) setError(error instanceof Error ? error.message : String(error));
+		});
+		return () => {
+			active = false;
+		};
+	}, [platformId]);
+	if (error) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+		role: "alert",
+		children: error
+	});
+	if (!result) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "文件列表加载中…" });
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+		type: "button",
+		"aria-expanded": open,
+		onClick: () => {
+			setOpen(!open);
+		},
+		children: [
+			result.files.length,
+			result.truncated ? "+" : "",
+			" 个文件"
+		]
+	}), open && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+		"aria-label": "平台文件列表",
+		children: [result.files.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "文件夹为空" }) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("ul", { children: result.files.map((file) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("li", { children: [
+			file.name,
+			file.isDir ? "（文件夹）" : ` · ${file.size} 字节`,
+			" · ",
+			new Date(file.mtime).toLocaleString()
+		] }, file.name)) }), result.truncated && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "仅显示前 200 项" })]
+	})] });
+}
 function clock(seconds) {
 	return (/* @__PURE__ */ new Date(seconds * 1e3)).toLocaleTimeString([], {
 		hour: "2-digit",
@@ -17342,6 +17389,7 @@ function TaskBoard({ tasks, rooms, chatId, roomId, platforms = [], t, onOpen, on
 							children: platform.name
 						}, platform.id))]
 					})] }),
+					task.platform_id && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(PlatformFiles, { platformId: task.platform_id }, task.platform_id),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: task.owner_name }),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: t("taskElapsed", { d: formatDuration(elapsed(task, now), t) }) }),
 					task.next_check_at !== null && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: t("taskNextCheck", { time: clock(task.next_check_at) }) }),

@@ -4941,18 +4941,22 @@ async function fakeGate(handler) {
 const until = async (f) => { for (let i = 0; i < 400 && !f(); i++) await new Promise(r => setTimeout(r, 5)); };
 const BOARD = { path: '【任务板 abc123】', desc: '谁手上有哪件事、做在哪\n#7 修登录 · 龙娘' };
 
-test('DSH member: each turn carries the gate wiki and task board, a page only once per conversation', async () => {
+test('DSH member: each turn carries public gate wiki and task board, a page only once per conversation', async () => {
+  const { fileURLToPath } = await import('node:url');
+  const publicRoot = fileURLToPath(new URL('.', import.meta.url));
+  const publicPage = fileURLToPath(new URL('./gate-context.mjs', import.meta.url));
   // the gate drops what it pushed per epoch (ctxsvc.only_new); the member only names its context
   const pushed = new Map();
   const gate = await fakeGate(({ body }) => {
     const seen = pushed.get(body.epoch) ?? new Set();
     pushed.set(body.epoch, seen);
-    const all = [BOARD, { path: '~/wiki/a.md', desc: body.text.includes('部署') ? '部署步骤' : 'a' }];
+    const all = [BOARD, { path: publicPage, desc: body.text.includes('部署') ? '部署步骤' : 'a' }];
     return { wiki: all.filter(w => !seen.has(w.path) && seen.add(w.path)) };
   });
   process.env.GATE_PORT = String(gate.port);
   try {
     const hub = makeHub();
+    hub.store.createPlatform({ id: 'public', name: '公共规范', path: publicRoot, is_public: true });
     const dsh = fakeDsh();
     dsh.attach(hub, [{ id: 'ds', name: 'DeepSeek' }]);
     hub.post(1, { authorKind: 'user', author: 'owner', name: '我', text: '@DeepSeek 怎么部署' });
@@ -4960,7 +4964,7 @@ test('DSH member: each turn carries the gate wiki and task board, a page only on
     const agent = dsh.sessions.get(dsh.made[0]);
     const first = agent.prompts[0].content[0].text;
     assert.match(first, /（可能相关的 wiki 页，需要时去读）/);
-    assert.match(first, /- ~\/wiki\/a\.md — 部署步骤/);
+    assert.ok(first.includes(`- ${publicPage} — 部署步骤`));
     assert.match(first, /- 【任务板 abc123】 — 谁手上有哪件事、做在哪\n#7 修登录 · 龙娘/);
     assert.ok(first.indexOf('wiki 页') < first.indexOf('【我】@DeepSeek'), 'the block comes before the channel messages');
     const { epoch, ...rest } = gate.calls[0].body;
