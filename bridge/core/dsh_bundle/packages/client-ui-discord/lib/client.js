@@ -1,4 +1,4 @@
-// dsh-client-source-sha256: 620ac5b5aa7223c0a80229c1e55dd9147e73c08e57c6a42f867359f85debe3b8
+// dsh-client-source-sha256: 374d76ecf92f6d3bc592f21cd96fcf0b48646dd042d41765258bfc6d53436d7f
 // dsh-style-sha256: 96f0046d930849d4d316bd118c14c9ff6f4d06ad164a6df43f3adb147116959d
 window.__ModuleLoader__.load({
  id: "@deepseek-ai/dsh-experimental-client-ui-discord",
@@ -19718,7 +19718,7 @@ function MemberGroup({ title, members, busy, onPick, onEdit, onRemove, t }) {
 * @param props - framework, injected, and locale shares.
 * @returns the three-column channel view.
 */
-function ChannelsPage({ useChannels, selectRoom, send, reviewTask, relocateTask, terminateTask, answerAsk, createRoom, renameRoom, listModels, listClis, listPersonas, addMember, updateMember, removeMember, setNoDispatch, getNoDispatch, replaceNoDispatch, setLead, setWorkspacePath, renewRoom, setDispatchMode, setMaxRelay, decidePermission, retryMessage, editMessage, withdrawMessage, openModelSettings, t }) {
+function ChannelsPage({ useChannels, selectRoom, send, reviewTask, updateTaskPlatform, relocateTask, terminateTask, answerAsk, createRoom, renameRoom, listModels, listClis, listPersonas, addMember, updateMember, removeMember, setNoDispatch, getNoDispatch, replaceNoDispatch, setLead, setWorkspacePath, renewRoom, setDispatchMode, setMaxRelay, decidePermission, retryMessage, editMessage, withdrawMessage, openModelSettings, t }) {
 	const state = useChannels((snapshot) => snapshot);
 	const [platforms, setPlatforms] = (0, react.useState)([]);
 	(0, react.useEffect)(() => {
@@ -20572,7 +20572,7 @@ function ChannelsPage({ useChannels, selectRoom, send, reviewTask, relocateTask,
 						onReview: reviewTask,
 						onRelocate: relocateTask,
 						onTerminate: terminateTask,
-						onPlatformChange: state.updateTaskPlatform
+						onPlatformChange: updateTaskPlatform
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
 						type: "button",

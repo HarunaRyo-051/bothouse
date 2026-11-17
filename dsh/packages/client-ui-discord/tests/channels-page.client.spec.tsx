@@ -35,6 +35,24 @@ function props(state: ChannelSnapshot, send: ChannelsPageProps['send'] = async (
 }
 
 describe('channels page', () => {
+  it('selects, changes and clears a task platform through page props', async () => {
+    const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => ({ platforms: [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }] }) } as Response)
+    const task = { id: 81, room_id: 1, parent_task: null, title: 'Platform task', owner: 'ju', owner_name: '橘', created_by: 'owner', created_by_name: 'Owner', status: 'accepted' as const, next_check_at: null, assign_msg_id: null, result_msg_id: null, note: null, created_at: 1, updated_at: 1, returned_at: null, platform_id: null as string | null }
+    const update = vi.fn(async (_id: number, platform: string | null) => { task.platform_id = platform })
+    try {
+      const pageProps = { ...props({ ...ready, taskChat: 1, tasks: [task] }), updateTaskPlatform: update }
+      const view = render(<ChannelsPage {...pageProps} />)
+      await act(async () => {})
+      fireEvent.click(screen.getByRole('button', { name: zh.taskBoardOpen }))
+      for (const value of ['a', 'b', '']) {
+        await act(async () => { fireEvent.change(screen.getByRole('combobox', { name: '#81 平台' }), { target: { value } }) })
+        view.rerender(<ChannelsPage {...pageProps} />)
+        expect(update).toHaveBeenLastCalledWith(81, value || null)
+        expect((screen.getByRole('combobox', { name: '#81 平台' }) as HTMLSelectElement).value).toBe(value)
+      }
+      expect(update).toHaveBeenCalledTimes(3)
+    } finally { fetcher.mockRestore() }
+  })
   it('answers a mirrored bridge question from the channel without opening its workspace', async () => {
     const decide = vi.fn(async () => {})
     const send = vi.fn(async () => {})
