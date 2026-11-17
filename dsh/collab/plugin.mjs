@@ -589,6 +589,7 @@ function savePlatform(store, body, existingId) {
   const is_public = body.is_public === undefined && current ? Boolean(current.is_public) : body.is_public === true;
   if (!name || !isAbsolute(path)) throw new CollabError('invalid', 'platform name and absolute path are required');
   if (!existsSync(path)) throw new CollabError('invalid', 'platform path does not exist');
+  if (!statSync(path).isDirectory()) throw new CollabError('invalid', 'platform path must be a directory');
   return existingId ? store.updatePlatform(id, { name, path, is_public }) : store.createPlatform({ id, name, path, is_public });
 }
 

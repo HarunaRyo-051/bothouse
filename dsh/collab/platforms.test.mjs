@@ -44,6 +44,10 @@ test('platform CRUD validates paths and preserves user files', async () => {
     assert.equal((await call('POST', '/collab/api/platforms', { id: 'a', name: 'A', path: process.cwd(), is_public: true })).status, 200);
     assert.equal((await call('POST', '/collab/api/platforms', { id: 'a', name: 'Again', path: process.cwd() })).status, 409);
     assert.equal((await call('GET', '/collab/api/platforms')).result.platforms.length, 1);
+    const plainFile = new URL('./platforms.test.mjs', import.meta.url).pathname;
+    assert.equal((await call('POST', '/collab/api/platforms', { id: 'file', name: 'File', path: plainFile })).status, 400);
+    assert.equal((await call('PATCH', '/collab/api/platforms/a', { path: plainFile })).status, 400);
+    assert.equal(store.platform('a').path, process.cwd());
     assert.equal((await call('PATCH', '/collab/api/platforms/a', { name: 'A2' })).result.platform.name, 'A2');
     assert.equal((await call('DELETE', '/collab/api/platforms/a')).status, 200);
     assert.deepEqual(store.listPlatforms(), []);
