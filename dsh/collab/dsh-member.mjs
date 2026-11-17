@@ -752,16 +752,22 @@ export class DshMembers {
   async turnContext(member, room, session, unseen) {
     const trigger = unseen.at(-1);
     const memory = this.memoryIndex.turn({ member: member.id, room: room.id, session });
-    const gate = await this.gateContext.turn({ member: member.id, room: room.id, session, text: trigger?.text ?? '' });
-    // 记忆论坛（轻量版）：every turn gets the pages that match what called it, not just a new context.
-    const picked = this.memoryForum.select(member.id, trigger?.text ?? '');
-    this.memoryForum.remember(member.id, room.id, picked);
     const task = this.store.db.prepare(`SELECT platform_id FROM tasks WHERE room_id = ? AND owner = ?
       AND status IN ('assigned', 'accepted', 'asked', 'rework') ORDER BY id DESC LIMIT 1`).get(room.id, member.id);
     const platform = task?.platform_id == null ? null : this.store.platform(task.platform_id);
-    const platformBlock = task === undefined ? '' : platform
-      ? `本次事项平台：${platform.name}。`
-      : '本次未指定平台，不得引用任何平台规则，只能查公共规范并说明待确认。';
+    const isDirectory = path => { try { return statSync(path).isDirectory(); } catch { return false; } };
+    const missing = task?.platform_id != null && (!platform || !isDirectory(platform.path));
+    const publicRoots = this.store.listPlatforms().filter(p => p.is_public && isDirectory(p.path)).map(p => p.path);
+    const allowedRoots = missing ? [] : [...(platform ? [platform.path] : []), ...publicRoots];
+    const gate = await this.gateContext.turn({ member: member.id, room: room.id, session, text: trigger?.text ?? '', allowedRoots });
+    // 记忆论坛（轻量版）：every turn gets the pages that match what called it, not just a new context.
+    const picked = this.memoryForum.select(member.id, trigger?.text ?? '');
+    this.memoryForum.remember(member.id, room.id, picked);
+    const platformBlock = missing
+      ? '平台文件夹找不到，本次未查该平台资料。本次检索范围为空，不得引用平台规则，需确认平台路径。'
+      : platform
+        ? `本次事项平台：${platform.name}。本次检索仅允许该平台与公共规范；仅下列返回条目可作为已检索资料，未返回的资料未查阅。`
+        : `本次未指定平台，不得引用任何平台规则，只能查公共规范并说明待确认。${publicRoots.length ? '仅下列返回条目可作为已检索资料。' : '未配置有效公共规范目录，本次未查任何规范资料。'}`;
     return {
       block: [memory.block, gate.block, platformBlock, this.memoryForum.block(picked)].filter(Boolean).join('\n\n'),
       commit: () => { memory.commit(); gate.commit(); },
