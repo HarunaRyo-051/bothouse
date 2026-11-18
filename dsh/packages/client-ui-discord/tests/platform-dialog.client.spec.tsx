@@ -40,6 +40,29 @@ it.each(['platform path does not exist', 'platform path must be a directory', 'p
   expect(alert.textContent).toMatch(/路径不存在|路径不是文件夹|代号冲突/)
   expect((screen.getByLabelText('名字') as HTMLInputElement).value).toBe('测试平台')
 })
+it('organizes only the clicked platform and shows source text, provenance, and read failures', async () => {
+  const platforms = [{ id: 'a', name: '甲', path: '/tmp/a' }, { id: 'b', name: '乙', path: '/tmp/b' }]
+  const fetcher = vi.spyOn(globalThis, 'fetch').mockImplementation(async url => {
+    if (String(url).endsWith('/organize')) return response({ results: [
+      { name: '网页.md', source: '/tmp/b/网页.md', status: 'read', note: 'wiki/source.md', version: 'abcdef',
+        web: { url: 'https://example.test/page', saved_at: '2026-11-16T10:00:00+08:00' },
+        segments: [{ location: '网页正文 · 段落 1', quote: '原文留在这里。' }] },
+      { name: '扫描件.pdf', status: 'unreadable', error: '扫描版没有可提取文字' },
+    ] })
+    return response(String(url).endsWith('/files') ? { files: [], truncated: false } : { platforms })
+  })
+  render(<PlatformDialog t={t} onClose={vi.fn()} onChange={vi.fn()} />)
+  const buttons = await screen.findAllByRole('button', { name: '整理资料' })
+  fireEvent.click(buttons[1])
+  expect(await screen.findByText('扫描版没有可提取文字')).toBeTruthy()
+  expect(fetcher.mock.calls.filter(([url]) => String(url).endsWith('/organize'))).toEqual([['/collab/api/platforms/b/organize', { method: 'POST' }]])
+  fireEvent.click(screen.getByText('查看正文和出处'))
+  expect(screen.getByRole('link', { name: 'https://example.test/page' }).getAttribute('href')).toBe('https://example.test/page')
+  expect(screen.getByText(/2026-11-16T10:00:00/)).toBeTruthy()
+  expect(screen.getByText(/原文留在这里。/)).toBeTruthy()
+  expect(screen.getByText('未确认便签：wiki/source.md')).toBeTruthy()
+})
+
 it('edits existing entries and requires a separate delete confirmation', async () => {
   let rows = [{ id: 'a', name: '旧平台', path: '/tmp/platform-fixture', is_public: false }]
   const fetcher = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {

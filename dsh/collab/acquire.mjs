@@ -95,7 +95,7 @@ export async function extractSource(buffer, extension) {
       web = { url: url.href, saved_at };
       body = body.replace(urlLine[0], '').replace(savedLine[0], '');
     }
-    segments = body.trim().split(/\n[ \t\r]*\n/).map((quote, i) => paragraph(quote, `${web ? '网页正文 · ' : ''}段落 ${i + 1}`));
+    segments = body.trim().split(/\n(?:[ \t\r]*\n)+/).map((quote, i) => paragraph(quote, `${web ? '网页正文 · ' : ''}段落 ${i + 1}`));
   } else {
     throw Error(`读不清：尚无 ${extension || '无扩展名'} 格式解析器，请保留原件并另存为支持的格式`);
   }
@@ -149,27 +149,31 @@ export async function organizePlatform(platform, excludedRoots) {
       }
     };
     await visit(root);
+    const readable = results.filter(result => result.segments);
     const wiki = join(root, 'wiki');
-    if (excludedRoots.has(wiki)) throw new CollabError('conflict', 'wiki 目录已登记为另一个平台');
-    try { if (!(await lstat(wiki)).isDirectory()) throw Error('wiki 必须为平台内的普通目录'); }
-    catch (error) { if (error.code === 'ENOENT') await mkdir(wiki); else throw error; }
-    try { await writeFile(join(wiki, 'README.md'), '# 知识便签\n\n自动整理的原件摘录，未经确认。\n', { flag: 'wx' }); }
-    catch (error) { if (error.code !== 'EEXIST') throw error; }
-    for (const result of results) {
-      if (!result.segments) continue;
-      // Versioned, deterministic names make deletion/rebuild safe and preserve older evidence.
+    let wikiError;
+    if (readable.length) try {
+      if (excludedRoots.has(wiki)) throw Error('wiki 目录已登记为另一个平台');
+      await mkdir(wiki).catch(error => { if (error.code !== 'EEXIST') throw error; });
+      if (!(await lstat(wiki)).isDirectory()) throw Error('wiki 必须为平台内的普通目录');
+      await writeFile(join(wiki, 'README.md'), '# 知识便签\n\n自动整理的原件摘录，未经确认。\n', { flag: 'wx' })
+        .catch(error => { if (error.code !== 'EEXIST') throw error; });
+    } catch (error) { wikiError = error.message; }
+    for (const result of readable) {
+      // Versioned names make deletion/rebuild safe and preserve older evidence.
       const name = `source-${hash(result.name).slice(0, 20)}-${result.version}.md`;
+      const path = join(wiki, name);
+      const content = markdown(result);
       try {
-        await writeFile(join(wiki, name), markdown(result), { flag: 'wx' });
+        if (wikiError) throw Error(wikiError);
+        await writeFile(path, content, { flag: 'wx' }).catch(async error => {
+          if (error.code !== 'EEXIST') throw error;
+          if (!(await lstat(path)).isFile() || await readFile(path, 'utf8') !== content) {
+            throw Error('便签路径已被占用或内容已修改，未覆盖，请核对后重试');
+          }
+        });
         result.note = `wiki/${name}`;
-      } catch (error) {
-        if (error.code === 'EEXIST') {
-          const stat = await lstat(join(wiki, name)).catch(error => { if (error.code !== 'ENOENT') throw error; });
-          if (!stat?.isFile() || await readFile(join(wiki, name), 'utf8') !== markdown(result)) {
-            result.status = 'unreadable'; result.error = '便签路径已被占用或内容已修改，未覆盖，请核对后重试';
-          } else result.note = `wiki/${name}`;
-        } else { result.status = 'unreadable'; result.error = `便签写入失败：${error.message}`; }
-      }
+      } catch (error) { result.note_error = `便签写入失败：${error.message}`; }
     }
     return { platform_id: platform.id, results, completed_at: new Date().toISOString() };
   } finally { active.delete(platform.id); }

@@ -68,6 +68,8 @@ The Windows command, package downloads, the background service and the DSH chann
 
 In DSH channels, pending workspace questions, approvals and failed jobs appear in a bar above the message composer. Expand it to read the request and answer, approve, deny or retry in place. Completed items disappear from the bar.
 
+In the DSH platform library, use **Organize sources** on a registered folder to read local documents and saved web excerpts, inspect reading gaps, and generate [unconfirmed notes with provenance](dsh/collab/README.md#整理平台资料).
+
 | You want | How bothouse helps |
 | --- | --- |
 | **An AI team of your own** | Bring the Claude Code, Codex, Gemini CLI or OpenCode you already signed in to; every role gets its own name, persona and session. |

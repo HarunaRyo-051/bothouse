@@ -1,4 +1,4 @@
-// dsh-client-source-sha256: ba95f62ec75ac307509e33f47c91bcfac18de99c373a8075c8e0c73ab2a51d23
+// dsh-client-source-sha256: c01c84d6ae11280a610225f0f416393f6d956298f56295cde36ede6bb2d505a8
 // dsh-style-sha256: 96f0046d930849d4d316bd118c14c9ff6f4d06ad164a6df43f3adb147116959d
 window.__ModuleLoader__.load({
  id: "@deepseek-ai/dsh-experimental-client-ui-discord",
@@ -17934,6 +17934,7 @@ function PlatformDialog({ t, onClose, onChange }) {
 												" · ",
 												t(file.status === "read" ? "platformSourceRead" : file.status === "partial" ? "platformSourcePartial" : "platformSourceUnreadable"),
 												file.error && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { children: file.error }),
+												file.note_error && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { children: file.note_error }),
 												file.warnings?.map((warning, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { children: warning }, i)),
 												file.note && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { children: t("platformNote", { path: file.note }) }),
 												file.segments && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("details", { children: [

@@ -8,7 +8,7 @@ import { randomUUID } from './uuid.ts'
 type Props = { t: TranslateNS<typeof NS>; onClose: () => void; onChange: (rows: readonly PlatformRecord[]) => void }
 type SourceResult = {
   name: string; source: string; status: 'read' | 'partial' | 'unreadable'; version?: string
-  note?: string; error?: string; warnings?: string[]
+  note?: string; error?: string; note_error?: string; warnings?: string[]
   web?: { url: string; saved_at: string }; segments?: { quote: string; location: string }[]
 }
 type Organization = { results: SourceResult[] } | { error: string }
@@ -97,6 +97,7 @@ export function PlatformDialog({ t, onClose, onChange }: Props) {
             {result.results.map(file => <li key={file.name} style={{ overflowWrap: 'anywhere' }}>
               <strong>{file.name}</strong> · {t(file.status === 'read' ? 'platformSourceRead' : file.status === 'partial' ? 'platformSourcePartial' : 'platformSourceUnreadable')}
               {file.error && <div>{file.error}</div>}
+              {file.note_error && <div>{file.note_error}</div>}
               {file.warnings?.map((warning, i) => <div key={i}>{warning}</div>)}
               {file.note && <div>{t('platformNote', { path: file.note })}</div>}
               {file.segments && <details>
