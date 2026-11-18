@@ -12,12 +12,13 @@ import { mentions, nameCalled, split, withoutLeadingMentions } from './mentions.
 import { NOTICE_PREFIXES } from './cloudweb.mjs';
 import { exitMark, workspaceAskMark } from './team-exit.mjs';
 import { checkDispatch, HandoffRulesError } from './handoff-rules.mjs';
+import { modelErrorReply } from './model-errors.mjs';
 
 /** Status codes and their labels (the eight names are a #139 B setting, not user-specified). */
 export const STATUS = {
   assigned: '派出', accepted: '已接', asked: '有疑问', declined: '退回',
   escalated: '升级', returned: '交回', done: '完成', rework: '返工',
-  cancelled: '已取消', superseded: '已替代',
+  cancelled: '已取消', superseded: '已替代', failed: '出错',
 };
 /** Terminal states: nothing but a new task follows them. */
 export const TERMINAL = ['done', 'cancelled', 'superseded'];
@@ -121,10 +122,11 @@ export class Tasks {
       get: this.db.prepare('SELECT * FROM tasks WHERE id = ?'),
       byMessage: this.db.prepare('SELECT id FROM tasks WHERE assign_msg_id = ? ORDER BY id LIMIT 1'),
       byTitle: this.db.prepare("SELECT id FROM tasks WHERE room_id = ? AND title = ? AND status <> 'done' ORDER BY id LIMIT 1"),
-      add: this.db.prepare(`INSERT INTO tasks (room_id, parent_task, title, owner, created_by, status, next_check_at, assign_msg_id, created_at, updated_at, reason, ref, base)
-        VALUES (?, ?, ?, ?, ?, 'assigned', ?, ?, ?, ?, ?, ?, ?) RETURNING *`),
+      add: this.db.prepare(`INSERT INTO tasks (room_id, parent_task, title, owner, created_by, status, next_check_at, assign_msg_id, created_at, updated_at, reason, ref, base, platform_id)
+        VALUES (?, ?, ?, ?, ?, 'assigned', ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`),
       // The last ? keeps (1) or drops (0) an undelivered reminder: only 接/问 stay the owner's turn.
       // A resumed (was paused) task starts a fresh watch: renewals back to 0 (rework: resetRenewals).
+      updatePlatform: this.db.prepare('UPDATE tasks SET platform_id = ? WHERE id = ? RETURNING *'),
       set: this.db.prepare(`UPDATE tasks SET status = ?, paused_at = NULL, next_check_at = ?, note = ?, updated_at = ?, remind_msg_id = CASE WHEN ? THEN remind_msg_id END,
         renewals = CASE WHEN paused_at IS NOT NULL THEN 0 ELSE renewals END WHERE id = ? AND status = ? RETURNING *`),
       handBack: this.db.prepare(`UPDATE tasks SET status = 'returned', paused_at = NULL, next_check_at = NULL, remind_msg_id = NULL, result_msg_id = ?, returned_at = ?, updated_at = ?
@@ -197,6 +199,14 @@ export class Tasks {
 
   task(id) { return this.q.get.get(id); }
 
+  setPlatform(id, platformId) {
+    const task = this.mustTask(id);
+    if (platformId != null && !this.store.platform(platformId)) throw new CollabError('invalid', `unknown platform ${platformId}`);
+    const row = this.q.updatePlatform.get(platformId ?? null, id);
+    this.record(row, 'platform', `#${id}「${row.title}」平台归属：${platformId ?? '未指定'}`);
+    return this.changed(id);
+  }
+
   /** The chat channel a room belongs to (itself unless it is a workspace). */
   chatOf(roomId) {
     const room = this.store.room(roomId);
@@ -233,6 +243,8 @@ export class Tasks {
       paused_at: t.paused_at ?? null, paused_chat: t.paused_chat ?? null,
       // Who is expected to review this hand-back when its dispatcher was busy at hand-back time.
       reviewer: t.reviewer ?? null, reviewer_name: t.reviewer == null ? null : this.nameOf(t.reviewer),
+      platform_id: t.platform_id ?? null,
+      prompt_constraint: t.platform_id == null ? '本次未指定平台，不得引用任何平台规则，只能查公共规范并说明待确认。' : `本次事项平台：${this.store.platform(t.platform_id)?.name ?? t.platform_id}。`,
     };
   }
 
@@ -320,7 +332,7 @@ export class Tasks {
    * `ref`/`base` (#574): an API dispatch passes ref (string, checked by the shared rules) and, for a
    * multi-editor task, base; undefined ref (tasks opened from chat or bridge cards) skips the check.
    */
-  assign({ roomId, title, owner, actor, parentTask, reviewOf, messageId, reason, ref, base, force = false, allowDuplicate = false }) {
+  assign({ roomId, title, owner, actor, parentTask, reviewOf, messageId, reason, ref, base, platformId, force = false, allowDuplicate = false }) {
     if (owner == null || typeof owner !== 'string' || !owner.trim()) throw new CollabError('invalid', '派活必须写明接活人 owner');
     if (this.store.noDispatch(roomId, owner)) throw new CollabError('forbidden', `${this.nameOf(owner)} 是转发机器人，不接活`);
     const room = this.store.room(roomId);
@@ -358,7 +370,8 @@ export class Tasks {
     const why = clip(reason);
     const refText = ref === undefined ? null : clip(ref);
     const baseText = ref === undefined ? null : clip(base);
-    const task = this.q.add.get(roomId, parentTask ?? null, text, owner, actor, now + CHECK_AFTER_S, messageId ?? null, now, now, why, refText, baseText);
+    if (platformId != null && !this.store.platform(platformId)) throw new CollabError('invalid', `unknown platform ${platformId}`);
+    const task = this.q.add.get(roomId, parentTask ?? null, text, owner, actor, now + CHECK_AFTER_S, messageId ?? null, now, now, why, refText, baseText, platformId ?? null);
     if (reviewOf != null) this.q.setSource.run('review', task.id);
     const refNote = `${refText ? `，参照：${refText}` : ''}${baseText ? `，底分支：${baseText}` : ''}`;
     const busyNote = busy.busy ? `（注：该成员在「${busy.roomName}」已有进行中任务 #${busy.task.id}）` : '';
@@ -546,7 +559,7 @@ export class Tasks {
     switch (action) {
       case 'assign':
         if (body.review_of != null && !verified) throw new CollabError('forbidden', 'delegating review needs a verified sender');
-        return this.assign({ roomId, title: body.title, owner: String(body.owner ?? ''), actor, parentTask: optional(body.parent_task), reviewOf: optional(body.review_of), messageId: optional(body.message_id), reason: body.reason, ref: String(body.ref ?? ''), base: body.base, force: Boolean(body.force), allowDuplicate: body.allow_duplicate === true });
+        return this.assign({ roomId, title: body.title, owner: String(body.owner ?? ''), actor, parentTask: optional(body.parent_task), reviewOf: optional(body.review_of), messageId: optional(body.message_id), reason: body.reason, ref: String(body.ref ?? ''), base: body.base, platformId: body.platform_id ?? null, force: Boolean(body.force), allowDuplicate: body.allow_duplicate === true });
       case 'stance': return this.stance(id, { actor, stance: String(body.stance ?? ''), note: body.note, messageId: optional(body.message_id) });
       case 'return': return this.handBack(id, { actor, messageId: optional(body.message_id) });
       case 'relocate':
@@ -562,6 +575,12 @@ export class Tasks {
   /** A member reply whose first line is 【接】【问】【退】【升】 (optionally #id) answers its task. */
   fromMessage(msg) {
     if (msg.author_kind !== 'role' || msg.card !== null) return undefined;
+    const lead = this.store.leadId(msg.room_id) === null ? this.hub.primaryMember() : this.hub.primaryIn(msg.room_id);
+    const failure = modelErrorReply(withoutLeadingMentions(String(msg.text), this.hub.routableIn(msg.room_id)));
+    if (failure !== undefined) {
+      if (msg.author !== lead?.id) this.failOpen(msg.room_id, msg.author, failure.zh);
+      return undefined;
+    }
     if (this.verdictsOf(msg)) return undefined;
     this.settleCall(msg);
     if (this.inWorkspace(msg.room_id) && workspaceAskMark(msg.text, this.hub.routableIn(msg.room_id))) return undefined;
@@ -716,6 +735,7 @@ export class Tasks {
         const key = `${msg.room_id}\0${owner}`;
         this.pendingCalls.delete(key);
         const latest = this.q.latestOf.get(msg.room_id, owner);
+        if (latest?.status === 'failed' && latest.created_by === lead.id) { this.retryFailed(latest.id); continue; }
         if (DELIVERED.includes(latest?.status) && !explicit.has(owner)) {
           this.pendingCalls.set(key, { roomId: msg.room_id, owner, lead: lead.id, title, messageId: msg.id, at: this.now() });
           continue;
@@ -726,7 +746,9 @@ export class Tasks {
     }
     // handBack false: a DSH reply in a workspace, which hands back only with [report] (fromMessage).
     if (!handBack) return undefined;
-    const callsLead = lead !== undefined && (mentions(text, team).has(lead.id) || nameCalled(text, lead.name, team.map(m => m.name)));
+    const autoPrefix = msg.auto_lead_mention && lead !== undefined ? `@${lead.name} ` : '';
+    const explicitText = autoPrefix && text.startsWith(autoPrefix) ? text.slice(autoPrefix.length) : text;
+    const callsLead = lead !== undefined && mentions(explicitText, team).has(lead.id);
     if (!callsLead) return undefined;
     const open = this.q.openChat.get(msg.room_id, msg.author, lead.id, ...WORKING);
     if (open === undefined || open.source === 'review') return undefined;
@@ -1078,6 +1100,26 @@ export class Tasks {
     const moved = this.task(id);
     const record = this.record(moved, 'relocate', `@${name} #${id}「${task.title}」已迁到${workspace.name}继续，原任务编号和验收记录不变。`);
     this.wake(task.owner, record);
+    return this.changed(id);
+  }
+
+  /** A failed model turn does not count as a hand-back. Workspace work is parked. */
+  failOpen(roomId, owner, reason) {
+    const workspace = this.store.room(roomId)?.kind === 'workspace';
+    const task = this.openOf(roomId, owner);
+    if (task === undefined) return undefined;
+    const row = this.q.set.get('failed', null, clip(reason), this.now(), 0, task.id, task.status);
+    if (row === undefined) return undefined;
+    this.record(row, 'failed', `#${row.id}「${row.title}」${this.nameOf(row.owner)} 出错：${reason}（不算交回）`);
+    if (workspace) this.releaseIfDone(roomId);
+    return this.changed(row.id);
+  }
+
+  /** The next call to an owner with failed work reuses its task. */
+  retryFailed(id) {
+    const row = this.q.set.get('assigned', this.now() + CHECK_AFTER_S, null, this.now(), 0, id, 'failed');
+    if (row === undefined) return undefined;
+    this.record(row, 'retry', `#${id}「${row.title}」重新派给 ${this.nameOf(row.owner)}`);
     return this.changed(id);
   }
 

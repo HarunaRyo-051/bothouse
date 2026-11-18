@@ -7,6 +7,7 @@
 // one that was consumed is settled from the Session log. Nothing is re-sent,
 // so a prompt is executed at most once.
 import { randomUUID } from 'node:crypto';
+import { modelErrorReply } from './model-errors.mjs';
 import { readFileSync, realpathSync, statSync } from 'node:fs';
 import { basename, isAbsolute, relative, sep } from 'node:path';
 import { exitTarget } from './team-exit.mjs';
@@ -201,6 +202,8 @@ const INTERRUPTED = Symbol('interrupted');
 export function friendlyFailure(raw) {
   if (raw?.code === 'COLLAB_CLI_START') return raw.message;
   const text = String(raw);
+  const model = modelErrorReply(text.replace(/^出错了：/, ''));
+  if (model !== undefined) return model.zh;
   if (/no.{0,12}(api.?key|key)|missing.{0,12}(key|credential)|api.?key.{0,12}(missing|not set|required)|未配置.*key/i.test(text)) return '还没有配置模型的 API Key，请先去配置模型。';
   if (/model.{0,30}(not found|unavailable|not available|unsupported)|unknown model|模型.*不可用|404/i.test(text)) return '这个模型暂时不可用，请检查模型名称或换一个模型。';
   // An unreachable provider is a setting or network problem. Echoing the transport wording
@@ -714,11 +717,14 @@ export class DshMembers {
       if (this.closed) return;
       this.hub.quota?.observe(member.id, room.id, { error: text });
       if (!text) { this.fail(job.id, `${member.name} 这一轮没有给出回复（${member.cli} 没有输出文字）`); return; }
+      if (modelErrorReply(text) !== undefined) { this.fail(job.id, text); return; }
       latest = '';
       const reply = this.returnToLead(job, member, text);
+      const lead = this.dispatchedBy(job, member);
+      const autoLeadMention = lead !== undefined && !mentions(text, this.hub.routableIn(job.room_id)).has(lead.id);
       const converted = localImageReply(reply, cwd, this.rt.files, this.rt.logger);
-      const committed = draft === undefined ? undefined : this.hub.commit(draft.id, 'role', member.id, converted.text, undefined, converted.attachments);
-      const message = committed ?? this.hub.post(job.room_id, { authorKind: 'role', author: member.id, name: member.name, clientKey, text: converted.text, attachments: converted.attachments }).message;
+      const committed = draft === undefined ? undefined : this.hub.commit(draft.id, 'role', member.id, converted.text, undefined, converted.attachments, autoLeadMention);
+      const message = committed ?? this.hub.post(job.room_id, { authorKind: 'role', author: member.id, name: member.name, clientKey, text: converted.text, attachments: converted.attachments, autoLeadMention }).message;
       this.noteMemoryUse(member, room, message);
       done = true;
       this.store.finishJob(job.id, 'done', message.id);
@@ -746,12 +752,24 @@ export class DshMembers {
   async turnContext(member, room, session, unseen) {
     const trigger = unseen.at(-1);
     const memory = this.memoryIndex.turn({ member: member.id, room: room.id, session });
-    const gate = await this.gateContext.turn({ member: member.id, room: room.id, session, text: trigger?.text ?? '' });
+    const task = this.store.db.prepare(`SELECT platform_id FROM tasks WHERE room_id = ? AND owner = ?
+      AND status IN ('assigned', 'accepted', 'asked', 'rework') ORDER BY id DESC LIMIT 1`).get(room.id, member.id);
+    const platform = task?.platform_id == null ? null : this.store.platform(task.platform_id);
+    const isDirectory = path => { try { return statSync(path).isDirectory(); } catch { return false; } };
+    const missing = task?.platform_id != null && (!platform || !isDirectory(platform.path));
+    const publicRoots = this.store.listPlatforms().filter(p => p.is_public && isDirectory(p.path)).map(p => p.path);
+    const allowedRoots = missing ? [] : [...(platform ? [platform.path] : []), ...publicRoots];
+    const gate = await this.gateContext.turn({ member: member.id, room: room.id, session, text: trigger?.text ?? '', allowedRoots });
     // 记忆论坛（轻量版）：every turn gets the pages that match what called it, not just a new context.
     const picked = this.memoryForum.select(member.id, trigger?.text ?? '');
     this.memoryForum.remember(member.id, room.id, picked);
+    const platformBlock = missing
+      ? '平台文件夹找不到，本次未查该平台资料。本次检索范围为空，不得引用平台规则，需确认平台路径。'
+      : platform
+        ? `本次事项平台：${platform.name}。本次检索仅允许该平台与公共规范；仅下列返回条目可作为已检索资料，未返回的资料未查阅。`
+        : `本次未指定平台，不得引用任何平台规则，只能查公共规范并说明待确认。${publicRoots.length ? '仅下列返回条目可作为已检索资料。' : '未配置有效公共规范目录，本次未查任何规范资料。'}`;
     return {
-      block: [memory.block, gate.block, this.memoryForum.block(picked)].filter(Boolean).join('\n\n'),
+      block: [memory.block, gate.block, platformBlock, this.memoryForum.block(picked)].filter(Boolean).join('\n\n'),
       commit: () => { memory.commit(); gate.commit(); },
     };
   }
@@ -830,12 +848,20 @@ export class DshMembers {
     }
     const kind = reason?.kind;
     const complete = kind === undefined || kind === 'completed' || kind === 'max-tokens';
+    if ((!complete && kind !== 'aborted') || modelErrorReply(text) !== undefined) {
+      const detail = complete || kind === 'aborted' ? text : String(reason?.error?.message ?? describeReason(reason));
+      this.fail(job.id, detail);
+      if (modelErrorReply(detail) === undefined) this.hub.tasks?.failOpen?.(job.room_id, member.id, friendlyFailure(detail));
+      return false;
+    }
     const reply = this.returnToLead(job, member, complete ? text : `${text}\n\n（这一轮没有正常结束：${describeReason(reason)}）`);
+    const lead = this.dispatchedBy(job, member);
+    const autoLeadMention = lead !== undefined && !mentions(text, this.hub.routableIn(job.room_id)).has(lead.id);
     const cwd = this.store.workspacePath(job.room_id, this.rt.workspacePath);
     const converted = localImageReply(reply, cwd, this.rt.files, this.rt.logger);
     const { message } = this.hub.post(job.room_id, {
       authorKind: 'role', author: member.id, name: member.name, clientKey: `dsh-job-${job.id}`,
-      text: converted.text, attachments: converted.attachments,
+      text: converted.text, attachments: converted.attachments, autoLeadMention,
     });
     this.noteMemoryUse(member, this.store.room(job.room_id), message);
     this.store.finishJob(job.id, 'done', message.id);
@@ -885,11 +911,14 @@ export class DshMembers {
     }
     this.hub.quota?.observe(job.member_id, job.room_id, { error: String(notice) });
     const error = friendlyFailure(notice);
+    const model = modelErrorReply(String(notice?.message ?? notice));
     this.hub.setError(job.member_id, error);
     this.postFailure(job, error, `dsh-job-${jobId}-${state}-${Date.now()}`, {
       title: '成员出错', state: 'failed', action: 'configure-model', job_id: jobId,
       member_id: job.member_id, trigger_id: job.trigger_id,
+      detail: String(notice?.message ?? notice),
     });
+    if (model !== undefined) this.hub.tasks?.failOpen?.(job.room_id, job.member_id, error);
   }
 
   postFailure(job, text, clientKey, card) {

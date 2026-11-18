@@ -4,6 +4,10 @@
 // comes from GATE_PORT, which bothouse sets on the `dsh web` it starts to the port it runs the
 // gate on (core/gate_proc.go gatePort); without it, or with the gate down, a turn goes out as before.
 
+import { realpathSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { isAbsolute, relative, sep } from 'node:path';
+
 // Same as the bridge's wait for /context (core/gate.go turnContext: 2s).
 export const GATE_CONTEXT_TIMEOUT_MS = 2_000;
 
@@ -26,7 +30,7 @@ export class GateContext {
    * name the context: a new `session`, reset, forget or resetRoom gives a new epoch (as core/gate.go turnEpoch).
    * @returns {Promise<{ block: string, commit: () => void }>} block is '' when there is nothing new.
    */
-  async turn({ member, room, session, text }) {
+  async turn({ member, room, session, text, allowedRoots }) {
     const none = { block: '', commit: () => {} };
     if (!this.port || typeof this.fetch !== 'function') return none;
     const key = `${member}\u0000${room}`;
@@ -51,7 +55,17 @@ export class GateContext {
       this.logger?.debug?.('collab: gate context fetch failed: %s', error?.message ?? error);
       return none;
     }
-    const fresh = (Array.isArray(out?.wiki) ? out.wiki : []).filter(w => w && typeof w.path === 'string');
+    const roots = allowedRoots?.flatMap(path => { try { return [realpathSync(path)]; } catch { return []; } });
+    const fresh = (Array.isArray(out?.wiki) ? out.wiki : []).filter(w => {
+      if (!w || typeof w.path !== 'string') return false;
+      if (roots === undefined || /^【任务板 [^\n]+】$/.test(w.path)) return true;
+      const path = w.path.startsWith('~/') ? homedir() + w.path.slice(1) : w.path;
+      if (!isAbsolute(path)) return false;
+      try {
+        const actual = realpathSync(path);
+        return roots.some(root => { const rel = relative(root, actual); return rel === '' || (!isAbsolute(rel) && rel !== '..' && !rel.startsWith('..' + sep)); });
+      } catch { return false; }
+    });
     if (fresh.length === 0) return none;
     const block = '（可能相关的 wiki 页，需要时去读）' + fresh.map(w => `\n- ${w.path} — ${w.desc ?? ''}`).join('');
     return { block, commit: () => {} };

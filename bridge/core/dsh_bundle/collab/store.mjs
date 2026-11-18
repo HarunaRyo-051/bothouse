@@ -2,8 +2,10 @@
 // and DSH delivery jobs. One SQLite file; every write is a single statement or
 // an explicit transaction, so a crash leaves either the old or the new row.
 import { DatabaseSync } from 'node:sqlite';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, realpathSync } from 'node:fs';
 import { dirname } from 'node:path';
+
+const TASK_STATUSES = ['assigned', 'accepted', 'asked', 'declined', 'escalated', 'returned', 'done', 'rework', 'cancelled', 'superseded', 'failed'];
 
 export const MAX_TEXT = 128 * 1024;
 // Per chat channel dispatch mode (user 2026-10-24 01:25: 单模型多进程 / 完全团队 / 混合,
@@ -27,6 +29,7 @@ const COLUMNS = [
   ['members', 'no_dispatch', 'INTEGER NOT NULL DEFAULT 0'],
   ['tasks', 'termination_reason', 'TEXT'], // v: why a task was cancelled/superseded (terminal states)
   ['tasks', 'superseded_by', 'INTEGER'],
+  ['tasks', 'platform_id', 'TEXT REFERENCES platforms(id) ON DELETE SET NULL'],
   ['tasks', 'reviewer', 'TEXT'], // who reviews a hand-back when its dispatcher is busy (null: the dispatcher)
   ['bindings', 'workspace_path', 'TEXT'], // Keep a CLI conversation in its original directory until /new. // NULL keeps existing names unchanged; only new UI members opt in.
 
@@ -167,6 +170,66 @@ export class Store {
     };
   }
 
+  listPlatforms() { return this.db.prepare('SELECT * FROM platforms ORDER BY created_at, id').all(); }
+  platform(id) { return this.db.prepare('SELECT * FROM platforms WHERE id = ?').get(id); }
+  createPlatform({ id, name, path, is_public = false }) {
+    const resolvedPath = existsSync(path) ? realpathSync(path) : path;
+    const duplicate = this.listPlatforms().find(platform => existsSync(platform.path) && realpathSync(platform.path) === resolvedPath);
+    if (duplicate) throw new CollabError('conflict', `这个文件夹已经登记过了：${duplicate.name}`);
+    try {
+      return this.db.prepare('INSERT INTO platforms (id, name, path, is_public, created_at) VALUES (?, ?, ?, ?, ?) RETURNING *')
+        .get(id, name, path, is_public ? 1 : 0, Date.now() / 1000);
+    } catch (error) {
+      if (/UNIQUE constraint failed/.test(error.message)) throw new CollabError('conflict', `platform ${id} already exists`);
+      throw error;
+    }
+  }
+  updatePlatform(id, fields) {
+    const current = this.platform(id);
+    if (!current) throw new CollabError('not-found', 'platform not found');
+    const next = { ...current, ...fields };
+    const resolvedPath = existsSync(next.path) ? realpathSync(next.path) : next.path;
+    const duplicate = this.listPlatforms().find(platform => platform.id !== id && existsSync(platform.path) && realpathSync(platform.path) === resolvedPath);
+    if (duplicate) throw new CollabError('conflict', `这个文件夹已经登记过了：${duplicate.name}`);
+    return this.db.prepare('UPDATE platforms SET name = ?, path = ?, is_public = ? WHERE id = ? RETURNING *')
+      .get(next.name, next.path, next.is_public ? 1 : 0, id);
+  }
+  deletePlatform(id) {
+    const row = this.db.prepare('DELETE FROM platforms WHERE id = ? RETURNING *').get(id);
+    if (!row) throw new CollabError('not-found', 'platform not found');
+    return row;
+  }
+
+  listDemands() {
+    return this.db.prepare('SELECT * FROM demands ORDER BY created_at DESC, id DESC').all();
+  }
+
+  createDemand(fields) {
+    const values = demandFields(fields, false);
+    const now = Date.now() / 1000;
+    return this.db.prepare(`INSERT INTO demands (title, source, why, accept, priority, status, room_id, task_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`).get(
+      values.title, values.source ?? '', values.why ?? '', values.accept ?? '',
+      values.priority ?? 'P2', values.status ?? 'draft', values.room_id ?? null, values.task_id ?? null, now, now);
+  }
+
+  updateDemand(id, fields) {
+    const current = this.db.prepare('SELECT * FROM demands WHERE id = ?').get(id);
+    if (!current) throw new CollabError('not-found', 'demand not found');
+    const values = demandFields(fields, true);
+    const next = { ...current, ...values };
+    return this.db.prepare(`UPDATE demands SET title = ?, source = ?, why = ?, accept = ?, priority = ?, status = ?,
+      room_id = ?, task_id = ?, updated_at = ? WHERE id = ? RETURNING *`).get(
+      next.title, next.source, next.why, next.accept, next.priority, next.status,
+      next.room_id, next.task_id, Date.now() / 1000, id);
+  }
+
+  deleteDemand(id) {
+    const row = this.db.prepare('DELETE FROM demands WHERE id = ? RETURNING *').get(id);
+    if (!row) throw new CollabError('not-found', 'demand not found');
+    return row;
+  }
+
   /**
    * Bring any older database up to date. Idempotent and run on every open: tables and
    * columns are created only when missing, so the version number never gates a column.
@@ -200,6 +263,24 @@ export class Store {
       this.dedupeWorkspaceNames();
       // v9: the tasks table (#139 team mode B), ensured idempotently like the columns above.
       this.ensureTasks();
+      this.db.exec(`CREATE TABLE IF NOT EXISTS platforms (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        path TEXT NOT NULL,
+        is_public INTEGER NOT NULL DEFAULT 0,
+        created_at REAL NOT NULL)`);
+      this.db.exec(`CREATE TABLE IF NOT EXISTS demands (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        source TEXT NOT NULL DEFAULT '',
+        why TEXT NOT NULL DEFAULT '',
+        accept TEXT NOT NULL DEFAULT '',
+        priority TEXT NOT NULL DEFAULT 'P2' CHECK (priority IN ('P0', 'P1', 'P2')),
+        status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'ready', 'planned', 'dropped')),
+        room_id INTEGER REFERENCES rooms(id),
+        task_id INTEGER REFERENCES tasks(id),
+        created_at REAL NOT NULL,
+        updated_at REAL NOT NULL)`);
       // 记忆论坛（轻量版）：which memory page a reply said it used. One row per (message, entry).
       this.db.exec(`CREATE TABLE IF NOT EXISTS memory_uses (
         message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
@@ -256,7 +337,7 @@ export class Store {
         title TEXT NOT NULL,
         owner TEXT NOT NULL,
         created_by TEXT NOT NULL,
-        status TEXT NOT NULL CHECK (status IN ('assigned', 'accepted', 'asked', 'declined', 'escalated', 'returned', 'done', 'rework')),
+        status TEXT NOT NULL CHECK (status IN (${TASK_STATUSES.map(s => `'${s}'`).join(', ')})),
         next_check_at REAL,
         result_msg_id INTEGER,
         assign_msg_id INTEGER,
@@ -275,11 +356,12 @@ export class Store {
         termination_reason TEXT,
         reviewer TEXT,
         superseded_by INTEGER,
+        platform_id TEXT REFERENCES platforms(id) ON DELETE SET NULL,
         renewals INTEGER NOT NULL DEFAULT 0)`);
     } else {
       const cols = new Set(this.db.prepare('PRAGMA table_info(tasks)').all().map(c => c.name));
       for (const [name, type] of [['parent_task', 'INTEGER'], ['next_check_at', 'REAL'], ['result_msg_id', 'INTEGER'],
-        ['assign_msg_id', 'INTEGER'], ['note', 'TEXT'], ['returned_at', 'REAL'], ['remind_msg_id', 'INTEGER'], ['reason', 'TEXT'], ['paused_at', 'REAL'], ['paused_chat', 'INTEGER'], ['source', 'TEXT'], ['ref', 'TEXT'], ['base', 'TEXT'], ['renewals', 'INTEGER NOT NULL DEFAULT 0'], ['card_member_id', 'TEXT'], ['termination_reason', 'TEXT'], ['superseded_by', 'INTEGER'], ['reviewer', 'TEXT']]) {
+        ['assign_msg_id', 'INTEGER'], ['note', 'TEXT'], ['returned_at', 'REAL'], ['remind_msg_id', 'INTEGER'], ['reason', 'TEXT'], ['paused_at', 'REAL'], ['paused_chat', 'INTEGER'], ['source', 'TEXT'], ['ref', 'TEXT'], ['base', 'TEXT'], ['renewals', 'INTEGER NOT NULL DEFAULT 0'], ['card_member_id', 'TEXT'], ['termination_reason', 'TEXT'], ['superseded_by', 'INTEGER'], ['reviewer', 'TEXT'], ['platform_id', 'TEXT REFERENCES platforms(id) ON DELETE SET NULL']]) {
         if (!cols.has(name)) this.db.exec(`ALTER TABLE tasks ADD COLUMN ${name} ${type}`);
       }
       // #574 B2 upgrade: workspace tasks in work with no check time start their 10-minute watch
@@ -303,9 +385,9 @@ export class Store {
   /** SQLite CHECK constraints need a table rebuild; keep rows, self-references and ids. */
   migrateTaskStatuses() {
     const schema = this.db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'tasks'").get()?.sql;
-    if (!schema || schema.includes("'cancelled'")) return;
+    if (!schema || schema.includes("'failed'")) return;
     const next = schema.replace(/CREATE TABLE\s+"?tasks"?/i, 'CREATE TABLE tasks_terminal')
-      .replace("'done', 'rework'", "'done', 'rework', 'cancelled', 'superseded'");
+      .replace(/status IN \([^)]*\)/, `status IN (${TASK_STATUSES.map(s => `'${s}'`).join(', ')})`);
     this.db.exec('PRAGMA foreign_keys = OFF');
     try {
       this.transaction(() => {
@@ -874,6 +956,35 @@ export class Store {
 
 export class CollabError extends Error {
   constructor(code, message) { super(message); this.code = code; this.name = 'CollabError'; }
+}
+
+function demandFields(input, partial) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new CollabError('invalid', 'demand body must be an object');
+  const fields = {};
+  for (const key of Object.keys(input)) {
+    if (!['title', 'source', 'why', 'accept', 'priority', 'status', 'room_id', 'task_id'].includes(key)) {
+      throw new CollabError('invalid', `unknown demand field: ${key}`);
+    }
+    const value = input[key];
+    if (key === 'title') {
+      if (typeof value !== 'string' || !value.trim()) throw new CollabError('invalid', 'title is required');
+      fields.title = value.trim();
+    } else if (['source', 'why', 'accept'].includes(key)) {
+      if (typeof value !== 'string') throw new CollabError('invalid', `${key} must be a string`);
+      fields[key] = value;
+    } else if (key === 'priority') {
+      if (!['P0', 'P1', 'P2'].includes(value)) throw new CollabError('invalid', 'invalid priority');
+      fields.priority = value;
+    } else if (key === 'status') {
+      if (!['draft', 'ready', 'planned', 'dropped'].includes(value)) throw new CollabError('invalid', 'invalid status');
+      fields.status = value;
+    } else {
+      if (value !== null && (!Number.isSafeInteger(value) || value <= 0)) throw new CollabError('invalid', `${key} must be a positive id or null`);
+      fields[key] = value;
+    }
+  }
+  if (!partial && !fields.title) throw new CollabError('invalid', 'title is required');
+  return fields;
 }
 
 function clampLimit(limit) {

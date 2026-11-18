@@ -1054,6 +1054,31 @@ test('DSH member: the answer to the lead\'s dispatch starts with @lead and wakes
   assert.ok(hub.store.openJobs().some(j => j.member_id === 'ds' && j.trigger_id === back.id));
 });
 
+test('native turn: auto-added lead mention wakes but never hands back a task', async () => {
+  const hub = makeHub();
+  const dsh = fakeDsh();
+  dsh.attach(hub, [{ id: 'zhu', name: '主' }, { id: 'fu', name: '副' }]);
+  hub.leadState = { selected: () => 'zhu' };
+  const tasks = new Tasks(hub, { setTimer: () => ({}), clearTimer() {} });
+  hub.tasks = tasks;
+  hub.post(1, { authorKind: 'role', author: 'zhu', name: '主', text: '@副 修一下' });
+  await settle();
+  const task = tasks.list(1).find(t => t.owner === 'fu');
+  const agent = dsh.sessions.get(dsh.made[0]);
+  dsh.turn(agent, ['主，改好了']);
+  await settle();
+  assert.equal(hub.store.job(1).state, 'done');
+  assert.equal(tasks.task(task.id).status, 'assigned', 'auto mention is a notification, not an explicit hand-back');
+  const auto = hub.store.page(1, undefined, 1)[0];
+  assert.ok(mentions(auto.text, hub.routable()).has('zhu'), 'auto mention still wakes the lead');
+  hub.post(1, { authorKind: 'role', author: 'zhu', name: '主', text: '@副 请明确交回' });
+  await settle();
+  dsh.turn(agent, ['@主 改好了']);
+  await settle();
+  assert.equal(tasks.task(task.id).status, 'returned', 'a model-authored @ still hands back');
+  hub.store.close();
+});
+
 test('DSH member: a discarded input ends its job and frees the queue', async () => {
   const hub = makeHub();
   const dsh = fakeDsh();
@@ -1874,6 +1899,27 @@ test('CLI member streams: first chunk opens a draft, later chunks edit it, the r
   assert.equal(hub.store.job(1).reply_id, rows[0].id);
   assert.equal(hub.store.job(2).member_id, 'ds', 'the <@teammate> in the final text hands off');
   assert.equal(hub.store.job(2).trigger_id, rows[0].id);
+});
+
+test('CLI member: error-only completion fails its job, removes draft and leaves task 出错', async () => {
+  const hub = makeHub();
+  hub.setMember({ id: 'ds', name: 'DeepSeek', kind: 'dsh', online: true });
+  hub.setMember({ id: 'cc', name: 'CC', kind: 'dsh', online: true });
+  hub.leadState = { selected: () => 'ds' };
+  const tasks = new Tasks(hub, { setTimer: () => ({}), clearTimer() {} });
+  hub.tasks = tasks;
+  cliMembers(hub, async (_t, _r, onText) => {
+    onText('Selected model is at capacity. Please try a different model.');
+    return 'Selected model is at capacity. Please try a different model.';
+  });
+  hub.post(1, { authorKind: 'role', author: 'ds', name: 'DeepSeek', text: '@CC 跑一次 date' });
+  await settle();
+  const task = tasks.list(1).find(t => t.owner === 'cc');
+  assert.equal(hub.store.job(1).state, 'failed');
+  assert.equal(tasks.task(task.id).status, 'failed');
+  assert.equal(hub.store.page(1, undefined, 20).filter(m => m.author === 'cc').length, 0);
+  const failure = hub.store.page(1, undefined, 20).find(m => JSON.parse(m.card ?? 'null')?.detail?.includes('Selected model is at capacity'));
+  assert.ok(failure, 'failure card keeps the raw provider message');
 });
 
 test('CLI member streams: an error or cancel removes the draft; no output leaves no row', async () => {
@@ -4895,18 +4941,22 @@ async function fakeGate(handler) {
 const until = async (f) => { for (let i = 0; i < 400 && !f(); i++) await new Promise(r => setTimeout(r, 5)); };
 const BOARD = { path: '【任务板 abc123】', desc: '谁手上有哪件事、做在哪\n#7 修登录 · 龙娘' };
 
-test('DSH member: each turn carries the gate wiki and task board, a page only once per conversation', async () => {
+test('DSH member: each turn carries public gate wiki and task board, a page only once per conversation', async () => {
+  const { fileURLToPath } = await import('node:url');
+  const publicRoot = fileURLToPath(new URL('.', import.meta.url));
+  const publicPage = fileURLToPath(new URL('./gate-context.mjs', import.meta.url));
   // the gate drops what it pushed per epoch (ctxsvc.only_new); the member only names its context
   const pushed = new Map();
   const gate = await fakeGate(({ body }) => {
     const seen = pushed.get(body.epoch) ?? new Set();
     pushed.set(body.epoch, seen);
-    const all = [BOARD, { path: '~/wiki/a.md', desc: body.text.includes('部署') ? '部署步骤' : 'a' }];
+    const all = [BOARD, { path: publicPage, desc: body.text.includes('部署') ? '部署步骤' : 'a' }];
     return { wiki: all.filter(w => !seen.has(w.path) && seen.add(w.path)) };
   });
   process.env.GATE_PORT = String(gate.port);
   try {
     const hub = makeHub();
+    hub.store.createPlatform({ id: 'public', name: '公共规范', path: publicRoot, is_public: true });
     const dsh = fakeDsh();
     dsh.attach(hub, [{ id: 'ds', name: 'DeepSeek' }]);
     hub.post(1, { authorKind: 'user', author: 'owner', name: '我', text: '@DeepSeek 怎么部署' });
@@ -4914,7 +4964,7 @@ test('DSH member: each turn carries the gate wiki and task board, a page only on
     const agent = dsh.sessions.get(dsh.made[0]);
     const first = agent.prompts[0].content[0].text;
     assert.match(first, /（可能相关的 wiki 页，需要时去读）/);
-    assert.match(first, /- ~\/wiki\/a\.md — 部署步骤/);
+    assert.ok(first.includes(`- ${publicPage} — 部署步骤`));
     assert.match(first, /- 【任务板 abc123】 — 谁手上有哪件事、做在哪\n#7 修登录 · 龙娘/);
     assert.ok(first.indexOf('wiki 页') < first.indexOf('【我】@DeepSeek'), 'the block comes before the channel messages');
     const { epoch, ...rest } = gate.calls[0].body;
@@ -5044,7 +5094,12 @@ test('CLI member: after /new the fresh context gets its MEMORY.md and the task b
   const data = mkdtempSync(join(tmpdir(), 'collab-mem-'));
   mkdirSync(join(data, 'roles', 'cc', 'wiki'), { recursive: true });
   writeFileSync(join(data, 'roles', 'cc', 'wiki', 'MEMORY.md'), '- [a](a/README.md) — 甲\n');
-  const gate = await fakeGate(() => ({ wiki: [{ ...BOARD, path: '【任务板 aaa111】' }] }));
+  const pushed = new Set();
+  const gate = await fakeGate(({ body }) => {
+    if (pushed.has(body.epoch)) return { wiki: [] };
+    pushed.add(body.epoch);
+    return { wiki: [{ ...BOARD, path: '【任务板 aaa111】' }] };
+  });
   process.env.BOTHOUSE_DATA_DIR = data;
   process.env.GATE_PORT = String(gate.port);
   try {
@@ -5066,7 +5121,7 @@ test('CLI member: after /new the fresh context gets its MEMORY.md and the task b
     await until(() => prompts.length === 3);
     assert.match(prompts[0], /你的记忆/);
     assert.match(prompts[0], /【任务板 aaa111】/);
-    assert.doesNotMatch(prompts[1], /你的记忆|【任务板/, 'same context: not again');
+    assert.doesNotMatch(prompts[1], /你的记忆|【任务板 aaa111】/, 'same context: not again');
     assert.match(prompts[2], /你的记忆/, '/new: MEMORY.md again');
     assert.match(prompts[2], /【任务板 aaa111】/, '/new: the unchanged board again');
   } finally {
@@ -5083,7 +5138,12 @@ test('CLI member: a session that could not be resumed gets its MEMORY.md and the
   const data = mkdtempSync(join(tmpdir(), 'collab-mem-'));
   mkdirSync(join(data, 'roles', 'cc', 'wiki'), { recursive: true });
   writeFileSync(join(data, 'roles', 'cc', 'wiki', 'MEMORY.md'), '- [a](a/README.md) — 甲\n');
-  const gate = await fakeGate(() => ({ wiki: [{ ...BOARD, path: '【任务板 aaa111】' }] }));
+  const pushed = new Set();
+  const gate = await fakeGate(({ body }) => {
+    if (pushed.has(body.epoch)) return { wiki: [] };
+    pushed.add(body.epoch);
+    return { wiki: [{ ...BOARD, path: '【任务板 aaa111】' }] };
+  });
   process.env.BOTHOUSE_DATA_DIR = data;
   process.env.GATE_PORT = String(gate.port);
   try {
@@ -5101,7 +5161,7 @@ test('CLI member: a session that could not be resumed gets its MEMORY.md and the
       await settle();
     }
     assert.match(prompts[0], /你的记忆/);
-    assert.doesNotMatch(prompts[1], /你的记忆|【任务板/, 'same context so far: not again');
+    assert.doesNotMatch(prompts[1], /你的记忆|【任务板 aaa111】/, 'same context so far: not again');
     assert.match(prompts[2], /你的记忆/, 'session lost: MEMORY.md again');
     assert.match(prompts[2], /【任务板 aaa111】/, 'session lost: the unchanged board again');
     assert.doesNotMatch(prompts[3], /你的记忆|【任务板/, 'given to the new session: not again');
@@ -5834,6 +5894,25 @@ for (const state of ['returned', 'done']) {
   });
 }
 
+test('member hand-back requires @lead; thanks after return does not hand back again', async () => {
+  const { tasks, say } = g34Setup();
+  say(1, '副，把 README 改一下', 'zhu');
+  await settle();
+  const [first] = tasks.list(1).filter(r => r.owner === 'fu');
+  assert.ok(first);
+  say(1, '主，谢谢，正在处理');
+  await settle();
+  assert.equal(tasks.task(first.id).status, 'assigned', 'bare-name reply is not a hand-back');
+  const result = say(1, '@主 改好了');
+  await settle();
+  assert.equal(tasks.task(first.id).status, 'returned');
+  assert.equal(tasks.task(first.id).result_msg_id, result.id);
+  say(1, '主，谢谢');
+  await settle();
+  assert.equal(tasks.task(first.id).result_msg_id, result.id, 'thanks cannot replace the delivered result');
+  assert.equal(tasks.list(1).filter(r => r.owner === 'fu').length, 1, 'thanks opens no new task');
+});
+
 test('r12: praise does not accept a mention task; thanks opens nothing, an @ still dispatches', async () => {
   const { tasks, say } = g34Setup();
   say(1, '副，把 README 改一下', 'zhu');
@@ -6302,6 +6381,68 @@ test('记忆论坛: a turn carries only the pages that match, and a reply that c
   assert.ok(forum.entries('ds').some(e => e.name === '新教训'));
   forum.write('ds', { name: '新教训', description: '更新后的描述' });
   assert.equal(forum.entries('ds').filter(e => e.name === '新教训').length, 1);
+});
+
+test('model-only errors fail open work without hand-back, and the next call retries the same task', async () => {
+  const { hub, tasks, say } = g34Setup();
+  say(1, '@副 跑一次 date', 'zhu');
+  await settle();
+  const first = tasks.list(1).find(t => t.owner === 'fu' && t.room_id === 1);
+  say(1, '@主 Selected model is at capacity. Please try a different model.');
+  await settle();
+  assert.equal(tasks.task(first.id).status, 'failed');
+  assert.match(tasks.task(first.id).note, /满载/);
+  say(1, '@副 重试上一件', 'zhu');
+  await settle();
+  assert.equal(tasks.task(first.id).status, 'assigned');
+  assert.equal(tasks.list(1).filter(t => t.owner === 'fu' && t.room_id === 1).length, 1);
+  say(1, '@主 已执行 date，结果是 Fri Nov 13');
+  await settle();
+  assert.equal(tasks.task(first.id).status, 'returned');
+  hub.store.close();
+});
+
+test('native finish fails partial timeout and error-only completion with raw failure cards', async () => {
+  const { hub, tasks, say } = g34Setup();
+  const members = Object.create(DshMembers.prototype);
+  members.hub = hub;
+  members.store = hub.store;
+  members.rt = { workspacePath: '', files: undefined, logger: quiet };
+  members.memoryForum = { cited: () => [] };
+  const member = { id: 'fu', name: '副' };
+  for (const [events, reason, raw] of [
+    [[{ type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '正在检查' }] } } }],
+      { kind: 'error', error: { message: 'request timed out' } }, 'request timed out'],
+    [[{ type: 'assistant/message', data: { message: { content: [{ type: 'text', text: 'Selected model is at capacity. Please try a different model.' }] } } }],
+      { kind: 'completed' }, 'Selected model is at capacity. Please try a different model.'],
+    [[], { kind: 'error', error: { message: 'unexpected status 401 Unauthorized' } }, 'unexpected status 401 Unauthorized'],
+  ]) {
+    const trigger = say(1, '@副 做一次检查', 'zhu');
+    await settle();
+    const task = tasks.list(1).find(t => t.owner === 'fu' && t.status === 'assigned');
+    const job = hub.store.addJob('fu', 1, trigger.id);
+    assert.equal(members.finish(job, member, { events, reason }), false);
+    await settle();
+    assert.equal(hub.store.job(job.id).state, 'failed');
+    assert.equal(tasks.task(task.id).status, 'failed');
+    const rows = hub.store.page(1, undefined, 100);
+    assert.equal(rows.filter(m => m.author === 'fu' && m.id > trigger.id).length, 0);
+    assert.ok(rows.some(m => JSON.parse(m.card ?? 'null')?.detail?.includes(raw)), `raw failure detail: ${raw}`);
+  }
+  hub.store.close();
+});
+
+test('model error classifier covers limits, timeout, auth, context and preserves real prose', async () => {
+  const { modelErrorReply } = await import('./model-errors.mjs');
+  for (const [text, kind] of [
+    ['Selected model is at capacity. Please try a different model.', 'capacity'],
+    ['Error: rate limit exceeded', 'quota'],
+    ['request timed out', 'timeout'],
+    ['unexpected status 401 Unauthorized', 'auth'],
+    ['maximum context length is 128000 tokens', 'context'],
+  ]) assert.equal(modelErrorReply(text)?.kind, kind);
+  assert.equal(modelErrorReply('查到原因是 Selected model is at capacity，已经补上重试'), undefined);
+  assert.match(friendlyFailure('stream disconnected before completion'), /超时/);
 });
 
 test('记忆论坛 rework: strict hand-back line, full text kept, unrelated page not picked', async () => {

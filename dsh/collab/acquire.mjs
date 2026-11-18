@@ -10,6 +10,33 @@ const MAX_BYTES = 32 * 1024 * 1024;
 const active = new Set();
 const paragraph = (quote, location) => ({ quote, location });
 
+// These tags mark paragraph boundaries; every body text node is still visited,
+// including text inside unknown or inline elements.
+const HTML_BLOCKS = new Set(`address article aside blockquote caption dd details dialog div dl dt
+  fieldset figcaption figure footer form h1 h2 h3 h4 h5 h6 header hgroup hr li main menu nav
+  ol p pre search section summary table tbody td th thead tfoot tr ul`.split(/\s+/));
+
+function htmlParagraphs(body) {
+  const segments = [];
+  let text = '';
+  const flush = () => {
+    const quote = text.trim();
+    if (quote) segments.push(paragraph(quote, `网页正文 · 段落 ${segments.length + 1}`));
+    text = '';
+  };
+  const stack = [...body.children].reverse();
+  while (stack.length) {
+    const node = stack.pop();
+    if (node === null) { flush(); continue; } // closing block boundary
+    if (node.type === 'text') { text += node.data; continue; }
+    if (node.name === 'br') { text += '\n'; continue; }
+    if (HTML_BLOCKS.has(node.name)) { flush(); stack.push(null); }
+    for (let i = (node.children?.length ?? 0) - 1; i >= 0; i--) stack.push(node.children[i]);
+  }
+  flush();
+  return segments;
+}
+
 export async function extractSource(buffer, extension) {
   const warnings = [];
   let segments = [], web;
@@ -80,8 +107,7 @@ export async function extractSource(buffer, extension) {
     if (!['http:', 'https:'].includes(url.protocol) || !saved_at || !Number.isFinite(Date.parse(saved_at))) throw Error('网页摘录需要 source-url（或 canonical）和 saved-at 元数据');
     $('script,style,noscript,template').remove();
     web = { url: url.href, saved_at };
-    const blocks = $('body p, body h1, body h2, body h3, body li, body td').toArray();
-    segments = (blocks.length ? blocks.map(el => $(el).text()) : [$('body').text()]).map((text, i) => paragraph(text.trim(), `网页正文 · 段落 ${i + 1}`));
+    segments = htmlParagraphs($('body')[0]);
   } else if (['.md', '.txt'].includes(extension)) {
     const text = new TextDecoder('utf-8', { fatal: true }).decode(buffer);
     const urlLine = text.match(/^(?:原网址|source_url)[:：][ \t]*(.+)$/m);

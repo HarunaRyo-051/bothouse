@@ -70,6 +70,20 @@ test('PDF reports each page with no extractable text, including mixed documents'
   await assert.rejects(extractSource(pdf(''), '.pdf'), /第 1 页读不清/);
 });
 
+test('HTML extracts all body text in order, including mixed block and inline content', async () => {
+  const html = Buffer.from(`<meta name="source-url" content="https://example.test/source">
+    <meta name="saved-at" content="2026-11-10T10:00:00+08:00">
+    <h1>申请规则</h1><div>必须在<strong>七日</strong>内提交。<section>补充说明。<article>
+    <pre>第一行\n  第二行</pre><blockquote>请保留原件。</blockquote>
+    <custom-text>自定义标签正文</custom-text></article>结尾。</section></div>
+    <p>附则。<br>下一行。</p><script>不是正文</script>`);
+  const result = await extractSource(html, '.html');
+  assert.deepEqual(result.web, { url: 'https://example.test/source', saved_at: '2026-11-10T10:00:00+08:00' });
+  assert.deepEqual(result.segments, [
+    '申请规则', '必须在七日内提交。', '补充说明。', '第一行\n  第二行', '请保留原件。', '自定义标签正文', '结尾。', '附则。\n下一行。',
+  ].map((quote, i) => ({ quote, location: `网页正文 · 段落 ${i + 1}` })));
+});
+
 test('organize route is owner-only, keeps platforms isolated, exposes failures, and rebuilds without changing originals', async () => {
   const root = await mkdtemp(join(tmpdir(), 'pal-organize-'));
   const a = join(root, 'a'), b = join(a, 'b'), nested = join(a, 'sources');
