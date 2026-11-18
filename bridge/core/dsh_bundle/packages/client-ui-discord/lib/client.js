@@ -1,4 +1,4 @@
-// dsh-client-source-sha256: c5eeb157232bd5c7295a5e7224ea118d8c95825fcd6eebf72eb25536e546b841
+// dsh-client-source-sha256: ba95f62ec75ac307509e33f47c91bcfac18de99c373a8075c8e0c73ab2a51d23
 // dsh-style-sha256: 96f0046d930849d4d316bd118c14c9ff6f4d06ad164a6df43f3adb147116959d
 window.__ModuleLoader__.load({
  id: "@deepseek-ai/dsh-experimental-client-ui-discord",
@@ -17725,6 +17725,8 @@ async function loadPlatforms(fetcher = fetch) {
 function PlatformDialog({ t, onClose, onChange }) {
 	const [rows, setRows] = (0, react.useState)([]);
 	const [counts, setCounts] = (0, react.useState)({});
+	const [organized, setOrganized] = (0, react.useState)({});
+	const [organizing, setOrganizing] = (0, react.useState)();
 	const [loading, setLoading] = (0, react.useState)(true);
 	const [error, setError] = (0, react.useState)("");
 	const [draft, setDraft] = (0, react.useState)({
@@ -17791,12 +17793,30 @@ function PlatformDialog({ t, onClose, onChange }) {
 					id
 				})
 			});
+			setOrganized({});
 			reset();
 			await refresh();
 		} catch (error) {
 			setError(error instanceof Error ? error.message : String(error));
 		} finally {
 			setBusy(false);
+		}
+	};
+	const organize = async (id) => {
+		setOrganizing(id);
+		try {
+			const result = await platformRequest(`/collab/api/platforms/${encodeURIComponent(id)}/organize`, { method: "POST" });
+			setOrganized((previous) => ({
+				...previous,
+				[id]: result
+			}));
+		} catch (error) {
+			setOrganized((previous) => ({
+				...previous,
+				[id]: { error: error instanceof Error ? error.message : String(error) }
+			}));
+		} finally {
+			setOrganizing(void 0);
 		}
 	};
 	const close = () => {
@@ -17819,7 +17839,7 @@ function PlatformDialog({ t, onClose, onChange }) {
 					close();
 				}
 				if (event.key !== "Tab") return;
-				const controls = Array.from(event.currentTarget.querySelectorAll("button:not(:disabled), input:not(:disabled)"));
+				const controls = Array.from(event.currentTarget.querySelectorAll("button:not(:disabled), input:not(:disabled), summary, a[href]"));
 				const first = controls[0], last = controls.at(-1);
 				if (!controls.includes(document.activeElement) || (event.shiftKey ? document.activeElement === first : document.activeElement === last)) {
 					event.preventDefault();
@@ -17839,6 +17859,7 @@ function PlatformDialog({ t, onClose, onChange }) {
 							children: t("platformLoading")
 						}) : rows.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", { children: t("platformEmpty") }) : rows.map((row) => {
 							const count = counts[row.id];
+							const result = organized[row.id];
 							return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 								className: ChannelsPage_module_default.settingsFields,
 								children: [
@@ -17861,30 +17882,86 @@ function PlatformDialog({ t, onClose, onChange }) {
 									}) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: [t("platformFiles", { count: count.count }), count.truncated ? "+" : ""] }) }),
 									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 										className: ChannelsPage_module_default.dialogActions,
-										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-											className: ChannelsPage_module_default.secondaryButton,
-											type: "button",
-											disabled: busy,
-											onClick: () => {
-												setDraft({
-													...row,
-													is_public: Boolean(row.is_public)
-												});
-												setDeleting(void 0);
-												setError("");
-											},
-											children: t("platformEdit")
-										}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-											className: ChannelsPage_module_default.secondaryButton,
-											type: "button",
-											disabled: busy,
-											onClick: () => {
-												setDeleting(row);
-												setError("");
-											},
-											children: t("platformDelete")
-										})]
-									})
+										children: [
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+												className: ChannelsPage_module_default.secondaryButton,
+												type: "button",
+												disabled: busy || organizing !== void 0,
+												onClick: () => {
+													organize(row.id);
+												},
+												children: t(organizing === row.id ? "platformOrganizing" : "platformOrganize")
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+												className: ChannelsPage_module_default.secondaryButton,
+												type: "button",
+												disabled: busy || organizing !== void 0,
+												onClick: () => {
+													setDraft({
+														...row,
+														is_public: Boolean(row.is_public)
+													});
+													setDeleting(void 0);
+													setError("");
+												},
+												children: t("platformEdit")
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+												className: ChannelsPage_module_default.secondaryButton,
+												type: "button",
+												disabled: busy || organizing !== void 0,
+												onClick: () => {
+													setDeleting(row);
+													setError("");
+												},
+												children: t("platformDelete")
+											})
+										]
+									}),
+									organizing === row.id && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+										role: "status",
+										children: t("platformOrganizing")
+									}),
+									result && ("error" in result ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+										role: "alert",
+										children: result.error
+									}) : result.results.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", { children: t("platformNoSources") }) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("ul", {
+										"aria-label": t("platformOrganize"),
+										children: result.results.map((file) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("li", {
+											style: { overflowWrap: "anywhere" },
+											children: [
+												/* @__PURE__ */ (0, react_jsx_runtime.jsx)("strong", { children: file.name }),
+												" · ",
+												t(file.status === "read" ? "platformSourceRead" : file.status === "partial" ? "platformSourcePartial" : "platformSourceUnreadable"),
+												file.error && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { children: file.error }),
+												file.warnings?.map((warning, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { children: warning }, i)),
+												file.note && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { children: t("platformNote", { path: file.note }) }),
+												file.segments && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("details", { children: [
+													/* @__PURE__ */ (0, react_jsx_runtime.jsx)("summary", { children: t("platformSourceDetails") }),
+													/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { children: file.source }),
+													/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: ["SHA-256: ", file.version] }),
+													file.web && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [
+														t("platformSourceUrl"),
+														": ",
+														/* @__PURE__ */ (0, react_jsx_runtime.jsx)("a", {
+															href: file.web.url,
+															target: "_blank",
+															rel: "noreferrer",
+															children: file.web.url
+														}),
+														" · ",
+														t("platformSavedAt"),
+														": ",
+														file.web.saved_at
+													] }),
+													file.segments.map((segment, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("blockquote", {
+														style: { whiteSpace: "pre-wrap" },
+														children: [segment.location, segment.quote]
+													}, i))
+												] })
+											]
+										}, file.name))
+									}))
 								]
 							}, row.id);
 						}),
@@ -17909,6 +17986,7 @@ function PlatformDialog({ t, onClose, onChange }) {
 										platformRequest(`/collab/api/platforms/${encodeURIComponent(deleting.id)}`, { method: "DELETE" }).then(async () => {
 											if (draft.id === deleting.id) reset();
 											setDeleting(void 0);
+											setOrganized({});
 											await refresh();
 										}).catch((error) => {
 											setError(error instanceof Error ? error.message : String(error));
@@ -17986,7 +18064,7 @@ function PlatformDialog({ t, onClose, onChange }) {
 									}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 										type: "submit",
 										className: ChannelsPage_module_default.primaryButton,
-										disabled: busy || loading || !draft.name.trim() || !draft.path.trim(),
+										disabled: busy || organizing !== void 0 || loading || !draft.name.trim() || !draft.path.trim(),
 										children: t(busy ? "settingsSaving" : "messageSave")
 									})]
 								})
@@ -21071,6 +21149,16 @@ const zh = {
 	platformDelete: "删除",
 	platformDeleteConfirm: "确认删除「{name}」？任务上的平台会被清空。资料文件不会删除。",
 	platformFiles: "{count} 个文件",
+	platformOrganize: "整理资料",
+	platformOrganizing: "正在整理资料…",
+	platformNoSources: "没有可整理的原件",
+	platformSourceRead: "已读取",
+	platformSourcePartial: "部分读不清",
+	platformSourceUnreadable: "读不清",
+	platformNote: "未确认便签：{path}",
+	platformSourceDetails: "查看正文和出处",
+	platformSourceUrl: "原网址",
+	platformSavedAt: "保存时间",
 	platformLoading: "读取中…",
 	channelSettings: "频道设置",
 	settingsBasic: "基本",
@@ -21305,6 +21393,16 @@ const en = {
 	platformDelete: "Delete",
 	platformDeleteConfirm: "Delete “{name}”? Platforms on tasks will be cleared. Reference files will be kept.",
 	platformFiles: "{count} files",
+	platformOrganize: "Organize sources",
+	platformOrganizing: "Organizing sources…",
+	platformNoSources: "No source files found",
+	platformSourceRead: "Read",
+	platformSourcePartial: "Partially readable",
+	platformSourceUnreadable: "Unreadable",
+	platformNote: "Unconfirmed note: {path}",
+	platformSourceDetails: "Show text and provenance",
+	platformSourceUrl: "Source URL",
+	platformSavedAt: "Saved at",
 	platformLoading: "Loading…",
 	approvalCount: "{count} permissions awaiting approval",
 	failureCount: "{count} failures needing attention",

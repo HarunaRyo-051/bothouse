@@ -16,7 +16,14 @@
   "dependencies": {
     "@agentclientprotocol/sdk": "1.4.0",
     "@zed-industries/claude-code-acp": "^0.16.2",
+    "cheerio": "1.2.0",
+    "fast-xml-parser": "5.12.1",
+    "jszip": "3.10.2",
+    "mammoth": "1.13.0",
+    "pdfjs-dist": "5.4.624",
+    "word-extractor": "1.0.4",
     "ws": "8.22.1",
+    "xlsx": "npm:xlsx-republish@0.20.3",
     "yaml": "2.9.1"
   },
   "optionalDependencies": {

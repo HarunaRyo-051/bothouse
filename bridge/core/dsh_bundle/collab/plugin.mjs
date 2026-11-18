@@ -6,7 +6,7 @@ import { personaLibrary } from './personas.mjs';
 //         name: /abs/path/dsh/collab/plugin.mjs
 //         config: { dataDir, workspacePath, leadFile?, fallbackLead?, botTokenEnv?, ownerName?, rooms?, dshMembers?, maxRelay? }
 import { createRequire } from 'node:module';
-import { readFileSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { Store, CollabError, publicMessage } from './store.mjs';
@@ -24,6 +24,7 @@ import { LeadState } from './lead-state.mjs';
 import { Attachments, INLINE_IMAGE } from './attachments.mjs';
 import { Later, registerLater } from './later.mjs';
 import { QuotaCooling, quotaDirectory } from './quota-cooling.mjs';
+import { organizePlatform } from './acquire.mjs';
 
 export const name = 'conest-collab';
 export const inject = [
@@ -206,11 +207,15 @@ export async function apply(ctx, rawConfig) {
     if (routed !== undefined) return routed;
     const opened = workspacesRoute(req, res, url, { store, hub, gateway, owner, later, tasks, dsh });
     if (opened !== undefined) return opened;
+    const platforms = platformsRoute(req, res, path, store, owner);
+    if (platforms !== undefined) return platforms;
     if (!owner(req)) {
       if (path === '/collab' && req.method === 'GET') return text(res, 401, 'text/plain; charset=utf-8', '请先在同一个浏览器打开 DSH 网页登录，再回到 /collab。');
       return refuse(req, res);
     }
     if (path === '/collab' && req.method === 'GET') return text(res, 200, 'text/html; charset=utf-8', PAGE);
+    const demandReply = demandsRoute(req, res, path, store);
+    if (demandReply !== undefined) return demandReply;
     if (path === '/collab/api/personas' && req.method === 'GET') return json(res, 200, personaLibrary(url.searchParams.get('lang') ?? 'zh'));
     if (path === '/collab/api/state' && req.method === 'GET') {
       return json(res, 200, { me: OWNER, lead_id: hub.selectedPrimaryMember()?.id ?? null,
@@ -558,6 +563,73 @@ function refuse(req, res) {
   return json(res, 401, { error: 'unauthorized' });
 }
 
+export function platformsRoute(req, res, path, store, owner) {
+  if (path === '/collab/api/platforms') {
+    if (req.method !== 'GET' && req.method !== 'POST') return json(res, 404, { error: 'not found' });
+    if (!owner(req)) return json(res, 401, { error: 'unauthorized' });
+    if (req.method === 'GET') return json(res, 200, { platforms: store.listPlatforms() });
+    return withBody(req, res, body => ({ platform: savePlatform(store, body) }));
+  }
+  const organize = /^\/collab\/api\/platforms\/([a-z0-9_-]+)\/organize$/i.exec(path);
+  if (organize) {
+    if (!owner(req)) return json(res, 401, { error: 'unauthorized' });
+    if (req.method !== 'POST') return json(res, 404, { error: 'not found' });
+    return withBody(req, res, async () => {
+      const platform = store.platform(organize[1]);
+      if (!platform) throw new CollabError('not-found', 'platform not found');
+      try {
+        const excludedRoots = new Set(store.listPlatforms().filter(row => row.id !== platform.id && existsSync(row.path)).map(row => realpathSync(row.path)));
+        return await organizePlatform(platform, excludedRoots);
+      }
+      catch (error) {
+        if (error instanceof CollabError) throw error;
+        throw new CollabError(error.code === 'ENOENT' ? 'not-found' : 'invalid', `无法整理平台资料：${error.message}`);
+      }
+    }, false);
+  }
+  const files = /^\/collab\/api\/platforms\/([^/]+)\/files$/.exec(path);
+  if (files) {
+    if (!owner(req)) return json(res, 401, { error: 'unauthorized' });
+    if (req.method !== 'GET') return json(res, 404, { error: 'not found' });
+    const platform = store.platform(decodeURIComponent(files[1]));
+    if (!platform) return json(res, 404, { error: 'platform not found' });
+    if (!isAbsolute(platform.path)) return json(res, 400, { error: 'platform path must be absolute' });
+    try {
+      if (!statSync(platform.path).isDirectory()) return json(res, 400, { error: 'platform path must be a directory' });
+      const entries = readdirSync(platform.path).sort();
+      const listed = entries.slice(0, 200).map(name => {
+        const stat = lstatSync(join(platform.path, name));
+        return { name, size: stat.size, mtime: stat.mtimeMs, isDir: stat.isDirectory() };
+      });
+      return json(res, 200, { files: listed, truncated: entries.length > 200 });
+    } catch (error) {
+      return json(res, error.code === 'ENOENT' ? 404 : 400, { error: 'platform folder cannot be listed' });
+    }
+  }
+  const match = /^\/collab\/api\/platforms\/([^/]+)$/.exec(path);
+  if (!match) return undefined;
+  if (!owner(req)) return json(res, 401, { error: 'unauthorized' });
+  const id = decodeURIComponent(match[1]);
+  if (req.method === 'PATCH') return withBody(req, res, body => ({ platform: savePlatform(store, body, id) }));
+  if (req.method === 'DELETE') return withBody(req, res, () => ({ platform: store.deletePlatform(id) }), false);
+  return json(res, 404, { error: 'not found' });
+}
+
+function savePlatform(store, body, existingId) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw new CollabError('invalid', 'platform body must be an object');
+  const id = existingId ?? String(body.id ?? '').trim();
+  if (!/^[a-z0-9][a-z0-9_-]{0,31}$/i.test(id)) throw new CollabError('invalid', 'platform id must be a short name');
+  const current = existingId ? store.platform(id) : undefined;
+  if (existingId && !current) throw new CollabError('not-found', 'platform not found');
+  const name = body.name === undefined && current ? current.name : String(body.name ?? '').trim();
+  const path = body.path === undefined && current ? current.path : String(body.path ?? '').trim();
+  const is_public = body.is_public === undefined && current ? Boolean(current.is_public) : body.is_public === true;
+  if (!name || !isAbsolute(path)) throw new CollabError('invalid', 'platform name and absolute path are required');
+  if (!existsSync(path)) throw new CollabError('invalid', 'platform path does not exist');
+  if (!statSync(path).isDirectory()) throw new CollabError('invalid', 'platform path must be a directory');
+  return existingId ? store.updatePlatform(id, { name, path, is_public }) : store.createPlatform({ id, name, path, is_public });
+}
+
 /**
  * #139 B task API, for the owner's browser and for cloud-web bots. The browser
  * always acts as the owner. Under the shared bot token a bot names itself in
@@ -576,13 +648,15 @@ function refuse(req, res) {
 export function tasksRoute(req, res, url, { tasks, gateway, owner }) {
   const path = url.pathname.replace(/\/+$/, '');
   const board = /^\/collab\/api\/rooms\/(\d+)\/tasks$/.exec(path);
+  const platformMatch = /^\/collab\/api\/tasks\/(\d+)\/platform$/.exec(path);
   const one = /^\/collab\/api\/tasks\/(\d+)(?:\/(stance|return|review|relocate|cancel|supersede))?$/.exec(path);
-  if (board === null && one === null) return undefined;
+  if (board === null && one === null && platformMatch === null) return undefined;
   const human = owner(req);
   if (!human && !gateway.authorized(req, url)) return Promise.resolve(refuse(req, res));
   // The browser is the owner; the shared bot token says nothing about which bot, so body.actor is unverified.
   const sender = body => (human ? { actor: OWNER, verified: true } : { actor: body?.actor, verified: false });
-  const id = Number((board ?? one)[1]);
+  const id = Number((board ?? one ?? platformMatch)[1]);
+  if (platformMatch !== null && req.method === 'PATCH') return withBody(req, res, body => ({ task: tasks.setPlatform(id, body.platform_id ?? null) }));
   if (req.method === 'GET' && board !== null) return withBody(req, res, () => ({ tasks: tasks.list(id), chat_id: tasks.chatOf(id) }), false);
   if (req.method === 'GET' && one !== null && one[2] === undefined) {
     return withBody(req, res, () => {
@@ -591,7 +665,8 @@ export function tasksRoute(req, res, url, { tasks, gateway, owner }) {
       return { task: tasks.view(t) };
     }, false);
   }
-  if (req.method !== 'POST') return Promise.resolve(json(res, 404, { error: 'not found' }));
+  if (req.method !== 'POST' && !(platformMatch !== null && req.method === 'PATCH')) return Promise.resolve(json(res, 404, { error: 'not found' }));
+  if (platformMatch !== null) return withBody(req, res, body => ({ task: tasks.setPlatform(id, body.platform_id ?? null) }));
   if (board !== null) return withBody(req, res, body => ({ task: tasks.perform('assign', { roomId: id, body }, sender(body)) }));
   return withBody(req, res, body => ({ task: tasks.perform(one[2], { id, body }, sender(body)) }));
 }
@@ -636,14 +711,17 @@ function ticketWorkspace(req, res, roomId, { store, hub, gateway, later, tasks, 
     if (!hub.routable().some(r => r.id === taskOwner)) throw new CollabError('member-missing', 'unknown owner');
     const title = String(body?.title ?? '').trim();
     if (!title) throw new CollabError('invalid', 'workspace handoff requires a title');
+    const platformId = body.platform_id == null || body.platform_id === '' ? null : String(body.platform_id);
+    if (platformId != null && !store.platform(platformId)) throw new CollabError('invalid', `unknown platform ${platformId}`);
+    const platformRule = platformId == null ? '本次未指定平台，不得引用任何平台规则，只能查公共规范并说明待确认。' : `本次事项平台：${store.platform(platformId).name}。`;
     if (store.room(roomId) === undefined) throw new CollabError('room-missing', `room ${roomId} does not exist`);
     const workspace = store.createWorkspace(roomId);
     hub.emit({ type: 'rooms', rooms: store.roomsView() });
     const name = hub.members.get(taskOwner)?.name ?? taskOwner;
     const reason = typeof body?.reason === 'string' ? body.reason : undefined;
     const { message } = hub.post(workspace.id, { authorKind: 'system', author: 'system', name: '交接',
-      text: `【交接】${name}：${title}${reason ? `\n${reason}` : ''}` });
-    const task = tasks.assign({ roomId: workspace.id, owner: taskOwner, actor: lead, title, reason, messageId: message.id, force: true });
+      text: `【交接】${name}：${title}${reason ? `\n${reason}` : ''}\n${platformRule}` });
+    const task = tasks.assign({ roomId: workspace.id, owner: taskOwner, actor: lead, title, reason, messageId: message.id, platformId, force: true });
     tasks.q.setSource.run('workspace', task.id);
     const chat = workspace.parent_id ?? roomId;
     const open = tasks.q.openChat.get(chat, taskOwner, lead, ...WORKING);
@@ -656,7 +734,23 @@ function ticketWorkspace(req, res, roomId, { store, hub, gateway, later, tasks, 
   });
 }
 
-const ERROR_STATUS = { 'room-missing': 404, 'member-missing': 404, 'task-missing': 404, conflict: 409, 'read-only': 403, forbidden: 403, offline: 503, 'member-busy': 409 };
+const ERROR_STATUS = { 'not-found': 404, 'room-missing': 404, 'member-missing': 404, 'task-missing': 404, conflict: 409, 'read-only': 403, forbidden: 403, offline: 503, 'member-busy': 409 };
+
+export function demandsRoute(req, res, path, store) {
+  if (path === '/collab/api/demands') {
+    if (req.method === 'GET') return json(res, 200, { demands: store.listDemands() });
+    if (req.method === 'POST') return withBody(req, res, body => ({ demand: store.createDemand(body) }));
+  }
+  const match = /^\/collab\/api\/demands\/(\d+)$/.exec(path);
+  if (!match) return undefined;
+  const id = Number(match[1]);
+  if (req.method === 'PATCH') return withBody(req, res, body => ({ demand: store.updateDemand(id, body) }));
+  if (req.method === 'DELETE') return withBody(req, res, () => {
+    store.deleteDemand(id);
+    return { ok: true };
+  }, false);
+  return undefined;
+}
 
 /** Parse a JSON body (unless `parse` is false), run fn, and map CollabError codes to HTTP statuses. */
 class BodyTooLarge extends Error {}

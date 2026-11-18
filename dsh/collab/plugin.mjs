@@ -24,6 +24,7 @@ import { LeadState } from './lead-state.mjs';
 import { Attachments, INLINE_IMAGE } from './attachments.mjs';
 import { Later, registerLater } from './later.mjs';
 import { QuotaCooling, quotaDirectory } from './quota-cooling.mjs';
+import { organizePlatform } from './acquire.mjs';
 
 export const name = 'conest-collab';
 export const inject = [
@@ -568,6 +569,23 @@ export function platformsRoute(req, res, path, store, owner) {
     if (!owner(req)) return json(res, 401, { error: 'unauthorized' });
     if (req.method === 'GET') return json(res, 200, { platforms: store.listPlatforms() });
     return withBody(req, res, body => ({ platform: savePlatform(store, body) }));
+  }
+  const organize = /^\/collab\/api\/platforms\/([a-z0-9_-]+)\/organize$/i.exec(path);
+  if (organize) {
+    if (!owner(req)) return json(res, 401, { error: 'unauthorized' });
+    if (req.method !== 'POST') return json(res, 404, { error: 'not found' });
+    return withBody(req, res, async () => {
+      const platform = store.platform(organize[1]);
+      if (!platform) throw new CollabError('not-found', 'platform not found');
+      try {
+        const excludedRoots = new Set(store.listPlatforms().filter(row => row.id !== platform.id && existsSync(row.path)).map(row => realpathSync(row.path)));
+        return await organizePlatform(platform, excludedRoots);
+      }
+      catch (error) {
+        if (error instanceof CollabError) throw error;
+        throw new CollabError(error.code === 'ENOENT' ? 'not-found' : 'invalid', `无法整理平台资料：${error.message}`);
+      }
+    }, false);
   }
   const files = /^\/collab\/api\/platforms\/([^/]+)\/files$/.exec(path);
   if (files) {
